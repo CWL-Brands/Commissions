@@ -267,6 +267,21 @@ export async function saveCommissionResults(
   const batch = db.batch();
   const timestamp = Timestamp.fromDate(new Date());
 
+  // Fetch commission config from Settings to get goal values
+  const configDoc = await db.collection('settings').doc('commission_config').get();
+  const config = configDoc.data();
+  
+  // Get rep's title to determine bucket goals
+  const repDoc = await db.collection('reps').doc(userId).get();
+  const repData = repDoc.data();
+  const repTitle = repData?.title || 'Account Executive';
+  
+  // Find the matching budget configuration
+  const budgetConfig = config?.budgets?.find((b: any) => b.title === repTitle);
+  const bucketAGoal = budgetConfig?.bucketA || 0;
+  const bucketBGoal = budgetConfig?.bucketB || 0;
+  const bucketCGoal = budgetConfig?.bucketC || 0;
+
   // Save Bucket A (New Business)
   const bucketAId = `${userId}_A_${quarterId}`;
   batch.set(db.collection('commission_entries').doc(bucketAId), {
@@ -274,6 +289,7 @@ export async function saveCommissionResults(
     quarterId,
     repId: userId,
     bucketCode: 'A',
+    goalValue: bucketAGoal,
     actualValue: results.newBusinessRevenue,
     notes: `${results.newCustomerCount} new customers | $${results.newBusinessRevenue.toFixed(2)} revenue | ${results.lineItemCount} line items`,
     updatedAt: timestamp,
@@ -287,6 +303,7 @@ export async function saveCommissionResults(
     quarterId,
     repId: userId,
     bucketCode: 'C',
+    goalValue: bucketCGoal,
     actualValue: results.maintainBusinessRevenue,
     notes: `${results.customerCount - results.newCustomerCount} existing customers | $${results.maintainBusinessRevenue.toFixed(2)} revenue`,
     updatedAt: timestamp,
@@ -294,7 +311,10 @@ export async function saveCommissionResults(
   }, { merge: true });
 
   // Save Bucket B (Product Mix) - Top 10 products
+  // For Bucket B, divide the total goal equally among top products
   const topProducts = results.productMix.slice(0, 10);
+  const bucketBGoalPerProduct = topProducts.length > 0 ? bucketBGoal / topProducts.length : 0;
+  
   topProducts.forEach((product) => {
     const bucketBId = `${userId}_B_${product.productNum}_${quarterId}`;
     batch.set(db.collection('commission_entries').doc(bucketBId), {
@@ -304,8 +324,8 @@ export async function saveCommissionResults(
       bucketCode: 'B',
       subGoalId: product.productNum,
       subGoalLabel: `${product.product} (${product.category1})`,
+      goalValue: bucketBGoalPerProduct,
       actualValue: product.revenue,
-      goalValue: 0, // Admin sets this
       notes: `${product.quantity} units | ${product.percentage.toFixed(1)}% of total | $${product.margin.toFixed(2)} margin`,
       updatedAt: timestamp,
       calculatedAt: timestamp,
