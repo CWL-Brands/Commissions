@@ -264,23 +264,52 @@ export async function saveCommissionResults(
 
 /**
  * Get sales person name from user email
- * Maps email to Fishbowl salesPerson field
+ * Maps email to Fishbowl salesPerson field (username column)
  */
 export function getSalesPersonFromEmail(email: string): string {
-  // Extract name from email (e.g., brandon@kanvabotanicals.com -> BrandonG)
-  const name = email.split('@')[0];
-  
-  // Map to Fishbowl sales person names
+  // Map email to Fishbowl username (from fishbowl_users table)
   const salesPersonMap: Record<string, string> = {
-    'brandon': 'BrandonG',
-    'ben': 'BenW',
-    'jared': 'JaredM',
-    'joe': 'JoeS',
-    'derek': 'DerekH',
-    'corey': 'CoreyM',
-    'john': 'JohnD',
-    // Add more mappings as needed
+    // Active Sales Reps
+    'ben@kanvabotanicals.com': 'BenW',
+    'brandon@kanvabotanicals.com': 'BrandonG',
+    'joe@kanvabotanicals.com': 'JSimmons',
+    'derek@kanvabotanicals.com': 'DerekW',
+    'jared@funktdistro.com': 'Jared',
+    'corey@cwlbrands.com': 'Corey',
+    'john@cwlbrands.com': 'John',
+    'josie@cwlbrands.com': 'Josie',
+    'cori@cwlbrands.com': 'Cori',
+    
+    // Operations & Admin
+    'rob@cwlbrands.com': 'admin',
+    'trina@cwlbrands.com': 'tthomas',
+    'operations@cwlbrands.com': 'Brian',
+    'crystal@cwlbrands.com': 'CrystalD',
+    'zz@cwlbrands.com': 'Zalak',
+    
+    // Other Staff
+    'sergio@kanvabotanicals.com': 'Sergio',
+    'kevin@cwlbrands.com': 'Kevin',
+    'ethan@cwlbrands.com': 'Ethan25',
+    'lydia@cwlbrands.com': 'LydiaN',
+    'marllyn@cwlbrands.com': 'MarllynC',
+    'rebecca@cwlbrands.com': 'Rebecca',
+    'bryan.barker@cwlbrands.com': 'bbarker',
+    
+    // Inactive/Former
+    'matt@cwlbrands.com': 'mcraft',
+    'josh@kanvabotanicals.com': 'JoshC',
+    'shane@kanvabotanicals.com': 'Shane-Inactive',
+    'ryan@cwlbrands.com': 'Ryan',
   };
 
-  return salesPersonMap[name.toLowerCase()] || name;
+  const username = salesPersonMap[email.toLowerCase()];
+  
+  if (!username) {
+    console.warn(`No Fishbowl username mapping found for ${email}`);
+    // Fallback: use email prefix
+    return email.split('@')[0];
+  }
+  
+  return username;
 }
