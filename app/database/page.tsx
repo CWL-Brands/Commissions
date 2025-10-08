@@ -25,7 +25,8 @@ import {
   Download,
   Trash2,
   Upload,
-  Calendar
+  Calendar,
+  Calculator
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionEntry, CommissionConfig, ProductSubGoal, ActivitySubGoal } from '@/types';
@@ -45,6 +46,7 @@ export default function DatabasePage() {
   const [selectedQuarter, setSelectedQuarter] = useState('');
   const [filterRep, setFilterRep] = useState('all');
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [calculating, setCalculating] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -368,6 +370,66 @@ export default function DatabasePage() {
     }
   };
 
+  const calculateCommissions = async () => {
+    if (!isAdmin) {
+      toast.error('Admin access required');
+      return;
+    }
+
+    if (!selectedQuarter) {
+      toast.error('Please select a quarter first');
+      return;
+    }
+
+    // Get quarter date range
+    const match = selectedQuarter.match(/Q(\d) (\d{4})/);
+    if (!match) {
+      toast.error('Invalid quarter format');
+      return;
+    }
+
+    const q = parseInt(match[1]);
+    const year = parseInt(match[2]);
+    const startMonth = (q - 1) * 3;
+    const endMonth = startMonth + 3;
+    const startDate = new Date(year, startMonth, 1).toISOString();
+    const endDate = new Date(year, endMonth, 0).toISOString();
+
+    setCalculating(true);
+    
+    try {
+      // Calculate for current user or selected rep
+      const targetUserId = filterRep === 'all' ? user.uid : filterRep;
+      
+      const response = await fetch('/api/calculate-commissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: targetUserId,
+          quarterId: selectedQuarter,
+          startDate,
+          endDate,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Calculation failed');
+      }
+
+      toast.success(`Commissions calculated! Revenue: $${data.results.totalRevenue.toFixed(2)}`);
+      
+      // Reload entries to show new calculations
+      await loadEntries(user.uid);
+    } catch (error: any) {
+      console.error('Error calculating commissions:', error);
+      toast.error(error.message || 'Failed to calculate commissions');
+    } finally {
+      setCalculating(false);
+    }
+  };
+
   const addQuarter = async () => {
     if (!isAdmin) {
       toast.error('Admin access required');
@@ -456,6 +518,24 @@ export default function DatabasePage() {
               {isAdmin && (
                 <>
                   <button
+                    onClick={calculateCommissions}
+                    disabled={calculating || !selectedQuarter}
+                    className="btn btn-primary flex items-center"
+                    title="Calculate commissions from Fishbowl data"
+                  >
+                    {calculating ? (
+                      <>
+                        <span className="spinner mr-2"></span>
+                        Calculating...
+                      </>
+                    ) : (
+                      <>
+                        <Calculator className="w-4 h-4 mr-2" />
+                        Calculate Commissions
+                      </>
+                    )}
+                  </button>
+                  <button
                     onClick={addQuarter}
                     className="btn btn-secondary flex items-center"
                   >
@@ -473,7 +553,7 @@ export default function DatabasePage() {
               )}
               <button
                 onClick={createNewEntry}
-                className="btn btn-primary flex items-center"
+                className="btn btn-secondary flex items-center"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 New Entry

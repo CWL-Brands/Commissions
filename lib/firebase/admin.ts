@@ -13,9 +13,11 @@ if (typeof window === 'undefined' && !isBuild) {
       const projectId = process.env.FIREBASE_PROJECT_ID || process.env.FIREBASE_ADMIN_PROJECT_ID;
       const privateKey = process.env.FIREBASE_PRIVATE_KEY || process.env.FIREBASE_ADMIN_PRIVATE_KEY;
       const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+      const databaseSecret = process.env.FIREBASE_DATABASE_SECRET;
 
-      // Only initialize if we have valid service account credentials
+      // Method 1: Use service account credentials (preferred)
       if (privateKey && projectId && clientEmail && privateKey.includes('BEGIN PRIVATE KEY')) {
+        console.log('[firebase-admin] Initializing with service account credentials');
         adminApp = initializeApp({
           credential: cert({
             projectId,
@@ -24,11 +26,25 @@ if (typeof window === 'undefined' && !isBuild) {
           }),
         });
         adminDb = getFirestore(adminApp);
+      } 
+      // Method 2: Use database secret (fallback for local dev)
+      else if (databaseSecret && projectId) {
+        console.log('[firebase-admin] Initializing with database secret');
+        adminApp = initializeApp({
+          credential: {
+            getAccessToken: async () => ({
+              access_token: databaseSecret,
+              expires_in: 3600,
+            }),
+          } as any,
+          databaseURL: `https://${projectId}.firebaseio.com`,
+        });
+        adminDb = getFirestore(adminApp);
       } else {
-        console.warn('Firebase Admin credentials not configured - admin features will be disabled');
+        console.warn('[firebase-admin] No valid credentials found - admin features will be disabled');
       }
     } catch (error) {
-      console.error('Firebase Admin initialization error:', error);
+      console.error('[firebase-admin] Initialization error:', error);
       // Don't throw - just disable admin features
     }
   } else {
