@@ -238,10 +238,17 @@ function calculateProductMix(items: any[]): ProductMixBreakdown[] {
 
   // Convert to array and add percentages
   return Array.from(productMap.entries())
+    .filter(([productNum, data]) => {
+      // Filter out shipping and non-product items
+      const product = data.product.toLowerCase();
+      return !product.includes('shipping') && 
+             !product.includes('freight') &&
+             productNum !== 'Shipping';
+    })
     .map(([productNum, data]) => ({
       productNum,
       product: data.product,
-      category1: data.category1,
+      category1: data.category1 || 'Uncategorized',
       category2: data.category2,
       revenue: data.revenue,
       margin: data.margin,

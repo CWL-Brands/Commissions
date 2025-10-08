@@ -396,6 +396,7 @@ export default function DatabasePage() {
     const endDate = new Date(year, endMonth, 0).toISOString();
 
     setCalculating(true);
+    const loadingToast = toast.loading('Calculating commissions from Fishbowl data... This may take a moment.');
     
     try {
       // Calculate for current user or selected rep
@@ -418,13 +419,18 @@ export default function DatabasePage() {
         throw new Error(data.error || 'Calculation failed');
       }
 
-      toast.success(`Commissions calculated! Revenue: $${data.results.totalRevenue.toFixed(2)}`);
+      toast.success(`✅ Commissions calculated! Total Revenue: $${data.results.totalRevenue.toFixed(2)} | ${data.results.lineItemCount} line items processed`, {
+        id: loadingToast,
+        duration: 5000,
+      });
       
       // Reload entries to show new calculations
       await loadEntries(user.uid);
     } catch (error: any) {
       console.error('Error calculating commissions:', error);
-      toast.error(error.message || 'Failed to calculate commissions');
+      toast.error(error.message || 'Failed to calculate commissions', {
+        id: loadingToast,
+      });
     } finally {
       setCalculating(false);
     }
@@ -669,14 +675,14 @@ export default function DatabasePage() {
                           <span className="text-gray-600 mr-1">$</span>
                           <input
                             type="number"
-                            value={entry.goalValue}
+                            value={entry.goalValue || 0}
                             onChange={(e) => updateEntry(entry.id, { goalValue: Number(e.target.value) })}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                             placeholder="0"
                           />
                         </div>
                       ) : (
-                        <span className="text-sm font-medium">{formatCurrency(entry.goalValue)}</span>
+                        <span className="text-sm font-medium">{formatCurrency(entry.goalValue || 0)}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
