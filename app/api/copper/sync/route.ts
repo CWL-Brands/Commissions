@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { getCopperUserId, getCopperMetadata, getUserData } from '@/lib/copper/shared-data';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,36 +74,31 @@ export async function POST(request: NextRequest) {
     const startUnix = Math.floor(start.getTime() / 1000);
     const endUnix = Math.floor(end.getTime() / 1000);
 
-    // Load user settings to get Copper user mapping
+    // Check database initialization
     if (!adminDb) {
       return NextResponse.json({ error: 'Database not initialized' }, { status: 500 });
     }
     
-    const userDoc = await adminDb.collection('users').doc(userId).get();
-    const userData = userDoc.data();
-    const copperUserEmail = userData?.copperUserEmail || userData?.email;
-
-    // Get Copper user ID
-    const usersRes = await fetchWithRetry(`${COPPER_API_BASE}/users`, {
-      method: 'GET',
-      headers: {
-        'X-PW-AccessToken': COPPER_API_KEY,
-        'X-PW-Application': 'developer_api',
-        'X-PW-UserEmail': COPPER_USER_EMAIL,
-      },
-    });
-    const users = await usersRes.json();
-    const copperUser = Array.isArray(users) 
-      ? users.find((u: any) => u.email?.toLowerCase() === copperUserEmail?.toLowerCase())
-      : null;
+    // Load user data from shared users collection
+    const userData = await getUserData(userId);
+    const userEmail = userData?.email;
     
-    if (!copperUser) {
+    if (!userEmail) {
+      return NextResponse.json({ error: 'User email not found' }, { status: 404 });
+    }
+
+    // Get Copper user ID from shared copper_users_map
+    const ownerId = await getCopperUserId(userEmail);
+    
+    if (!ownerId) {
       return NextResponse.json({ 
-        error: `No Copper user found for ${copperUserEmail}` 
+        error: `No Copper user mapping found for ${userEmail}` 
       }, { status: 404 });
     }
 
-    const ownerId = copperUser.id;
+    // Load Copper metadata for configuration
+    const metadata = await getCopperMetadata();
+    const closedWonStages = metadata?.defaults?.CLOSED_WON_STAGES || ['Payment Received'];
     const results = {
       opportunities: 0,
       revenue: 0,
@@ -122,8 +118,7 @@ export async function POST(request: NextRequest) {
       if (Array.isArray(opps)) {
         results.opportunities = opps.length;
         
-        // Calculate total revenue from closed-won opportunities
-        const closedWonStages = ['Closed Won', 'Won']; // Adjust based on your pipeline
+        // Calculate total revenue from closed-won opportunities using shared config
         const revenue = opps
           .filter((opp: any) => closedWonStages.includes(opp.pipeline_stage_name || opp.stage_name))
           .reduce((sum: number, opp: any) => sum + (opp.monetary_value || 0), 0);
@@ -168,12 +163,19 @@ export async function POST(request: NextRequest) {
         });
 
         // Update commission entries for Bucket D (Effort) sub-goals
-        // Match activity types to configured activities
+        // Match activity types to configured activities from shared metadata
+        const userActivityTypes = metadata?.activityTypes?.user || [];
         const activitiesSnapshot = await adminDb.collection('activities').where('active', '==', true).get();
         
         for (const activityDoc of activitiesSnapshot.docs) {
           const activityConfig = activityDoc.data();
           const activityName = activityConfig.activity;
+          
+          // Match activity name with Copper activity types
+          const copperActivityType = userActivityTypes.find((at: any) => 
+            at.name?.toLowerCase() === activityName?.toLowerCase()
+          );
+          
           const actualCount = activityCounts[activityName] || 0;
           
           const entryId = `${userId}_D_${activityDoc.id}_${quarterId}`;
@@ -184,6 +186,7 @@ export async function POST(request: NextRequest) {
             bucketCode: 'D',
             subGoalId: activityDoc.id,
             subGoalLabel: activityName,
+            copperActivityTypeId: copperActivityType?.id,
             goalValue: activityConfig.goal || 0,
             actualValue: actualCount,
             notes: `Auto-synced from Copper on ${new Date().toISOString()}`,
@@ -199,7 +202,13 @@ export async function POST(request: NextRequest) {
       success: true, 
       userId, 
       quarterId,
-      results 
+      copperUserId: ownerId,
+      userEmail,
+      results,
+      metadata: {
+        closedWonStages,
+        activityTypesCount: metadata?.activityTypes?.user?.length || 0
+      }
     });
   } catch (error: any) {
     console.error('Sync error:', error);

@@ -1,0 +1,286 @@
+/**
+ * Commission Calculator Service
+ * Uses Fishbowl data from Goals app (fishbowl_soitems collection)
+ */
+
+import { adminDb } from '@/lib/firebase/admin';
+import { Timestamp } from 'firebase-admin/firestore';
+
+export interface CommissionCalculationParams {
+  repName: string; // Sales person name from Fishbowl (e.g., "BrandonG")
+  quarterId: string;
+  startDate: Date;
+  endDate: Date;
+}
+
+export interface ProductMixBreakdown {
+  productNum: string;
+  product: string;
+  category1: string;
+  category2: string;
+  revenue: number;
+  margin: number;
+  quantity: number;
+  percentage: number;
+}
+
+export interface CommissionResults {
+  newBusinessRevenue: number;
+  maintainBusinessRevenue: number;
+  productMix: ProductMixBreakdown[];
+  totalRevenue: number;
+  totalMargin: number;
+  orderCount: number;
+  customerCount: number;
+  newCustomerCount: number;
+  lineItemCount: number;
+}
+
+/**
+ * Calculate commissions from Fishbowl SO Items
+ */
+export async function calculateCommissions(
+  params: CommissionCalculationParams
+): Promise<CommissionResults> {
+  if (!adminDb) {
+    throw new Error('Database not initialized');
+  }
+
+  const { repName, quarterId, startDate, endDate } = params;
+
+  // Query fishbowl_soitems for this rep and date range
+  const itemsSnapshot = await adminDb
+    .collection('fishbowl_soitems')
+    .where('salesPerson', '==', repName)
+    .where('commissionDate', '>=', Timestamp.fromDate(startDate))
+    .where('commissionDate', '<=', Timestamp.fromDate(endDate))
+    .get();
+
+  const items = itemsSnapshot.docs.map(doc => doc.data());
+
+  if (items.length === 0) {
+    return {
+      newBusinessRevenue: 0,
+      maintainBusinessRevenue: 0,
+      productMix: [],
+      totalRevenue: 0,
+      totalMargin: 0,
+      orderCount: 0,
+      customerCount: 0,
+      newCustomerCount: 0,
+      lineItemCount: 0,
+    };
+  }
+
+  // Get unique customers and orders
+  const customerIds = new Set(items.map(item => item.customerId).filter(Boolean));
+  const orderIds = new Set(items.map(item => item.soId).filter(Boolean));
+
+  // Identify new vs existing customers
+  const newCustomers = await identifyNewCustomers(Array.from(customerIds), startDate);
+
+  // Calculate New Business (Bucket A) - Revenue from new customers
+  const newBusinessRevenue = items
+    .filter(item => newCustomers.has(item.customerId))
+    .reduce((sum, item) => sum + (item.revenue || 0), 0);
+
+  // Calculate Maintain Business (Bucket C) - Revenue from existing customers
+  const maintainBusinessRevenue = items
+    .filter(item => !newCustomers.has(item.customerId))
+    .reduce((sum, item) => sum + (item.revenue || 0), 0);
+
+  // Calculate Product Mix (Bucket B)
+  const productMix = calculateProductMix(items);
+
+  // Calculate totals
+  const totalRevenue = items.reduce((sum, item) => sum + (item.revenue || 0), 0);
+  const totalMargin = items.reduce((sum, item) => sum + (item.margin || 0), 0);
+
+  return {
+    newBusinessRevenue,
+    maintainBusinessRevenue,
+    productMix,
+    totalRevenue,
+    totalMargin,
+    orderCount: orderIds.size,
+    customerCount: customerIds.size,
+    newCustomerCount: newCustomers.size,
+    lineItemCount: items.length,
+  };
+}
+
+/**
+ * Identify new customers (first order in this period)
+ */
+async function identifyNewCustomers(
+  customerIds: string[],
+  periodStartDate: Date
+): Promise<Set<string>> {
+  if (!adminDb || customerIds.length === 0) {
+    return new Set();
+  }
+
+  const newCustomers = new Set<string>();
+
+  // Batch query customers to check first order date
+  for (const customerId of customerIds) {
+    // Get earliest SO item for this customer
+    const firstItemSnapshot = await adminDb
+      .collection('fishbowl_soitems')
+      .where('customerId', '==', customerId)
+      .orderBy('commissionDate', 'asc')
+      .limit(1)
+      .get();
+
+    if (!firstItemSnapshot.empty) {
+      const firstItem = firstItemSnapshot.docs[0].data();
+      const firstOrderDate = firstItem.commissionDate?.toDate();
+
+      // If first order is within this period, it's a new customer
+      if (firstOrderDate && firstOrderDate >= periodStartDate) {
+        newCustomers.add(customerId);
+      }
+    }
+  }
+
+  return newCustomers;
+}
+
+/**
+ * Calculate product mix breakdown
+ */
+function calculateProductMix(items: any[]): ProductMixBreakdown[] {
+  // Group by product number
+  const productMap = new Map<string, {
+    product: string;
+    category1: string;
+    category2: string;
+    revenue: number;
+    margin: number;
+    quantity: number;
+  }>();
+
+  items.forEach(item => {
+    const productNum = item.productNum || 'Unknown';
+    const existing = productMap.get(productNum) || {
+      product: item.product || 'Unknown Product',
+      category1: item.productC1 || 'Uncategorized',
+      category2: item.productC2 || '',
+      revenue: 0,
+      margin: 0,
+      quantity: 0,
+    };
+
+    productMap.set(productNum, {
+      product: existing.product,
+      category1: existing.category1,
+      category2: existing.category2,
+      revenue: existing.revenue + (item.revenue || 0),
+      margin: existing.margin + (item.margin || 0),
+      quantity: existing.quantity + (item.quantity || 0),
+    });
+  });
+
+  // Calculate total revenue for percentages
+  const totalRevenue = items.reduce((sum, item) => sum + (item.revenue || 0), 0);
+
+  // Convert to array and add percentages
+  return Array.from(productMap.entries())
+    .map(([productNum, data]) => ({
+      productNum,
+      product: data.product,
+      category1: data.category1,
+      category2: data.category2,
+      revenue: data.revenue,
+      margin: data.margin,
+      quantity: data.quantity,
+      percentage: totalRevenue > 0 ? (data.revenue / totalRevenue) * 100 : 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue); // Sort by revenue descending
+}
+
+/**
+ * Save commission calculation results to Firestore
+ */
+export async function saveCommissionResults(
+  userId: string,
+  quarterId: string,
+  results: CommissionResults
+): Promise<void> {
+  if (!adminDb) {
+    throw new Error('Database not initialized');
+  }
+
+  const batch = adminDb.batch();
+  const timestamp = Timestamp.fromDate(new Date());
+
+  // Save Bucket A (New Business)
+  const bucketAId = `${userId}_A_${quarterId}`;
+  batch.set(adminDb.collection('commission_entries').doc(bucketAId), {
+    id: bucketAId,
+    quarterId,
+    repId: userId,
+    bucketCode: 'A',
+    actualValue: results.newBusinessRevenue,
+    notes: `${results.newCustomerCount} new customers | $${results.newBusinessRevenue.toFixed(2)} revenue | ${results.lineItemCount} line items`,
+    updatedAt: timestamp,
+    calculatedAt: timestamp,
+  }, { merge: true });
+
+  // Save Bucket C (Maintain Business)
+  const bucketCId = `${userId}_C_${quarterId}`;
+  batch.set(adminDb.collection('commission_entries').doc(bucketCId), {
+    id: bucketCId,
+    quarterId,
+    repId: userId,
+    bucketCode: 'C',
+    actualValue: results.maintainBusinessRevenue,
+    notes: `${results.customerCount - results.newCustomerCount} existing customers | $${results.maintainBusinessRevenue.toFixed(2)} revenue`,
+    updatedAt: timestamp,
+    calculatedAt: timestamp,
+  }, { merge: true });
+
+  // Save Bucket B (Product Mix) - Top 10 products
+  const topProducts = results.productMix.slice(0, 10);
+  topProducts.forEach((product) => {
+    const bucketBId = `${userId}_B_${product.productNum}_${quarterId}`;
+    batch.set(adminDb.collection('commission_entries').doc(bucketBId), {
+      id: bucketBId,
+      quarterId,
+      repId: userId,
+      bucketCode: 'B',
+      subGoalId: product.productNum,
+      subGoalLabel: `${product.product} (${product.category1})`,
+      actualValue: product.revenue,
+      goalValue: 0, // Admin sets this
+      notes: `${product.quantity} units | ${product.percentage.toFixed(1)}% of total | $${product.margin.toFixed(2)} margin`,
+      updatedAt: timestamp,
+      calculatedAt: timestamp,
+    }, { merge: true });
+  });
+
+  await batch.commit();
+}
+
+/**
+ * Get sales person name from user email
+ * Maps email to Fishbowl salesPerson field
+ */
+export function getSalesPersonFromEmail(email: string): string {
+  // Extract name from email (e.g., brandon@kanvabotanicals.com -> BrandonG)
+  const name = email.split('@')[0];
+  
+  // Map to Fishbowl sales person names
+  const salesPersonMap: Record<string, string> = {
+    'brandon': 'BrandonG',
+    'ben': 'BenW',
+    'jared': 'JaredM',
+    'joe': 'JoeS',
+    'derek': 'DerekH',
+    'corey': 'CoreyM',
+    'john': 'JohnD',
+    // Add more mappings as needed
+  };
+
+  return salesPersonMap[name.toLowerCase()] || name;
+}
