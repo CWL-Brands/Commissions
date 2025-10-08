@@ -37,7 +37,41 @@ export interface CommissionResults {
 }
 
 /**
+ * Check if a rep is active and eligible for commissions
+ */
+async function getRepStatus(fishbowlUsername: string): Promise<{ isActive: boolean; isCommissioned: boolean }> {
+  if (!adminDb) {
+    return { isActive: false, isCommissioned: false };
+  }
+
+  try {
+    // Query sales_reps collection by fishbowlUsername
+    const repsSnapshot = await adminDb
+      .collection('sales_reps')
+      .where('fishbowlUsername', '==', fishbowlUsername)
+      .limit(1)
+      .get();
+
+    if (repsSnapshot.empty) {
+      // Default: if not in database, assume active and commissioned (for backwards compatibility)
+      console.warn(`Rep ${fishbowlUsername} not found in sales_reps collection`);
+      return { isActive: true, isCommissioned: true };
+    }
+
+    const repData = repsSnapshot.docs[0].data();
+    return {
+      isActive: repData.isActive ?? true,
+      isCommissioned: repData.isCommissioned ?? false,
+    };
+  } catch (error) {
+    console.error(`Error checking rep status for ${fishbowlUsername}:`, error);
+    return { isActive: false, isCommissioned: false };
+  }
+}
+
+/**
  * Calculate commissions from Fishbowl SO Items
+ * Only calculates for active, commissioned reps
  */
 export async function calculateCommissions(
   params: CommissionCalculationParams
@@ -47,6 +81,23 @@ export async function calculateCommissions(
   }
 
   const { repName, quarterId, startDate, endDate } = params;
+
+  // Check if rep is active and commissioned
+  const repStatus = await getRepStatus(repName);
+  if (!repStatus.isActive || !repStatus.isCommissioned) {
+    console.warn(`Rep ${repName} is not eligible for commissions (active: ${repStatus.isActive}, commissioned: ${repStatus.isCommissioned})`);
+    return {
+      newBusinessRevenue: 0,
+      maintainBusinessRevenue: 0,
+      productMix: [],
+      totalRevenue: 0,
+      totalMargin: 0,
+      orderCount: 0,
+      customerCount: 0,
+      newCustomerCount: 0,
+      lineItemCount: 0,
+    };
+  }
 
   // Query fishbowl_soitems for this rep and date range
   const itemsSnapshot = await adminDb
@@ -211,12 +262,13 @@ export async function saveCommissionResults(
     throw new Error('Database not initialized');
   }
 
-  const batch = adminDb.batch();
+  const db = adminDb; // Type-safe reference
+  const batch = db.batch();
   const timestamp = Timestamp.fromDate(new Date());
 
   // Save Bucket A (New Business)
   const bucketAId = `${userId}_A_${quarterId}`;
-  batch.set(adminDb.collection('commission_entries').doc(bucketAId), {
+  batch.set(db.collection('commission_entries').doc(bucketAId), {
     id: bucketAId,
     quarterId,
     repId: userId,
@@ -229,7 +281,7 @@ export async function saveCommissionResults(
 
   // Save Bucket C (Maintain Business)
   const bucketCId = `${userId}_C_${quarterId}`;
-  batch.set(adminDb.collection('commission_entries').doc(bucketCId), {
+  batch.set(db.collection('commission_entries').doc(bucketCId), {
     id: bucketCId,
     quarterId,
     repId: userId,
@@ -244,7 +296,7 @@ export async function saveCommissionResults(
   const topProducts = results.productMix.slice(0, 10);
   topProducts.forEach((product) => {
     const bucketBId = `${userId}_B_${product.productNum}_${quarterId}`;
-    batch.set(adminDb.collection('commission_entries').doc(bucketBId), {
+    batch.set(db.collection('commission_entries').doc(bucketBId), {
       id: bucketBId,
       quarterId,
       repId: userId,

@@ -577,6 +577,15 @@ export default function SettingsPage() {
             {/* Quarter Selector & Actions */}
             <div className="flex items-center gap-3">
               <button
+                onClick={() => router.push('/settings/reps')}
+                className="btn btn-secondary flex items-center"
+                title="Manage sales reps and commission eligibility"
+              >
+                <UserPlus className="w-4 h-4 mr-2" />
+                Manage Reps
+              </button>
+              
+              <button
                 onClick={addQuarter}
                 className="btn btn-secondary flex items-center"
                 title="Add new quarter for forecasting"
