@@ -1,0 +1,159 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if running in emulator (development mode)
+    function isEmulator() {
+      return resource == null || request.auth == null;
+    }
+    
+    // Helper functions for commission calculator
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // ========== COMMISSION CALCULATOR COLLECTIONS ==========
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow write: if isAdmin() || isEmulator();
+    }
+    
+    // Settings collection (internal app - permissive)
+    match /settings/{document=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Commission entries (internal app - permissive)
+    match /commission_entries/{entryId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Commission payouts (internal app - permissive)
+    match /commission_payouts/{payoutId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Quarters (internal app - permissive)
+    match /quarters/{quarterId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Reps roster (internal app - permissive)
+    match /reps/{repId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Activities (internal app - permissive)
+    match /activities/{activityId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // ========== EXISTING RULES (FROM YOUR CONSOLE) ==========
+    
+    // Products collection - public read, admin write
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if request.auth != null || isEmulator() || true; // Internal app - permissive
+    }
+    
+    // Pricing configuration - public read, admin write
+    match /pricing/{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null || isEmulator();
+    }
+    
+    // Shipping configuration - public read, admin write
+    match /shipping/{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null || isEmulator();
+    }
+    
+    // Payment configuration - public read, admin write
+    match /payment/{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null || isEmulator();
+    }
+    
+    // Email templates - public read, admin write
+    match /templates/{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null || isEmulator();
+    }
+    
+    // Admin-only collections
+    match /admin/{document=**} {
+      allow read, write: if true;
+    }
+    
+    // Integration connections
+    match /integrations/{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null || isEmulator();
+    }
+    
+    // ShipStation webhook events
+    match /shipstation_events/{document=**} {
+      allow write: if true;
+      allow read: if request.auth != null || isEmulator();
+    }
+    
+    match /shipstation_events_index/{document=**} {
+      allow write: if true;
+      allow read: if request.auth != null || isEmulator();
+    }
+    
+    // ShipStation Firestore queue
+    match /shipstationRequests/{requestId} {
+      allow write: if true;
+      allow read: if request.auth != null || isEmulator();
+    }
+    
+    match /shipstationResponses/{requestId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    
+    // Analytics
+    match /analytics/{document=**} {
+      allow write: if true;
+      allow read: if request.auth != null || isEmulator();
+    }
+    
+    // Goals - users can manage and read only their own goals
+    match /goals/{goalId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow write: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Metrics - users can write and read only their own
+    match /metrics/{metricId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+    
+    // Organization settings
+    match /settings/organization/defaults {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}

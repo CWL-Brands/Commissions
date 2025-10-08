@@ -1,0 +1,28 @@
+mutation CreateNewGoal($name: String!, $description: String!, $targetValue: Float!, $deadline: Timestamp!, $type: String!, $status: String!) @auth(level: USER) {
+  goal_insert(data: {name: $name, description: $description, targetValue: $targetValue, deadline: $deadline, type: $type, status: $status, ownerId_expr: "auth.uid", createdAt_expr: "request.time", updatedAt_expr: "request.time", currentValue: 0.0})
+}
+
+query GetMyGoals @auth(level: USER) {
+  goals(where: {ownerId: {eq_expr: "auth.uid"}}) {
+    id
+    name
+    description
+    targetValue
+    currentValue
+    deadline
+    type
+    status
+    priority
+    category
+    createdAt
+    updatedAt
+  }
+}
+
+mutation UpdateGoal($id: UUID!, $name: String, $description: String, $targetValue: Float, $deadline: Timestamp, $type: String, $status: String, $priority: String, $category: String) @auth(level: USER) {
+  goal_update(key: {id: $id}, data: {name: $name, description: $description, targetValue: $targetValue, deadline: $deadline, type: $type, status: $status, priority: $priority, category: $category, updatedAt_expr: "request.time"})
+}
+
+mutation DeleteGoal($id: UUID!) @auth(level: USER) {
+  goal_delete(key: {id: $id})
+}

@@ -1,0 +1,45 @@
+type User @table {
+  copperUserId: String!
+  displayName: String!
+  email: String!
+  photoUrl: String
+  role: String
+}
+
+type Goal @table {
+  owner: User
+  name: String!
+  type: String!
+  targetValue: Float!
+  currentValue: Float!
+  deadline: Timestamp!
+  status: String!
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+  description: String
+  category: String
+  priority: String
+}
+
+type GoalUpdate @table {
+  goal: Goal
+  timestamp: Timestamp!
+  newValue: Float!
+  updatedByUserId: String!
+  note: String
+}
+
+type CRMEntityLink @table {
+  goal: Goal
+  crmEntityType: String!
+  crmEntityId: String!
+  crmFieldName: String
+}
+
+type Comment @table {
+  goal: Goal
+  user: User
+  content: String!
+  createdAt: Timestamp!
+  parentCommentId: UUID
+}

@@ -1,0 +1,764 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { auth, db } from '@/lib/firebase/config';
+import { onAuthStateChanged } from 'firebase/auth';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  addDoc, 
+  updateDoc,
+  deleteDoc,
+  doc,
+  getDoc,
+  orderBy,
+  Timestamp
+} from 'firebase/firestore';
+import { 
+  Database as DatabaseIcon, 
+  Plus, 
+  ArrowLeft,
+  Filter,
+  Download,
+  Trash2,
+  Upload,
+  Calendar
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+import { CommissionEntry, CommissionConfig, ProductSubGoal, ActivitySubGoal } from '@/types';
+import { calculatePayout, formatAttainment, formatCurrency } from '@/lib/commission/calculator';
+
+export default function DatabasePage() {
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [entries, setEntries] = useState<CommissionEntry[]>([]);
+  const [config, setConfig] = useState<CommissionConfig | null>(null);
+  const [products, setProducts] = useState<ProductSubGoal[]>([]);
+  const [activities, setActivities] = useState<ActivitySubGoal[]>([]);
+  const [reps, setReps] = useState<any[]>([]);
+  const [quarters, setQuarters] = useState<string[]>([]);
+  const [selectedQuarter, setSelectedQuarter] = useState('');
+  const [filterRep, setFilterRep] = useState('all');
+  const [showUploadModal, setShowUploadModal] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      setUser(user);
+      
+      const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',') || [];
+      setIsAdmin(adminEmails.includes(user.email || ''));
+      
+      await loadData(user.uid);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
+
+  useEffect(() => {
+    if (user && selectedQuarter) {
+      loadEntries(user.uid);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedQuarter, filterRep]);
+
+  const loadData = async (userId: string) => {
+    try {
+      // Load config
+      const configDoc = await getDoc(doc(db, 'settings', 'commission_config'));
+      if (configDoc.exists()) {
+        setConfig(configDoc.data() as CommissionConfig);
+      }
+
+      // Load products
+      const productsSnapshot = await getDocs(collection(db, 'products'));
+      const productsData: ProductSubGoal[] = [];
+      productsSnapshot.forEach((doc) => {
+        productsData.push({ id: doc.id, ...doc.data() } as ProductSubGoal);
+      });
+      setProducts(productsData);
+
+      // Load activities
+      const activitiesSnapshot = await getDocs(collection(db, 'activities'));
+      const activitiesData: ActivitySubGoal[] = [];
+      activitiesSnapshot.forEach((doc) => {
+        activitiesData.push({ id: doc.id, ...doc.data() } as ActivitySubGoal);
+      });
+      setActivities(activitiesData);
+
+      // Load reps
+      const repsSnapshot = await getDocs(collection(db, 'reps'));
+      const repsData: any[] = [];
+      repsSnapshot.forEach((doc) => {
+        repsData.push({ id: doc.id, ...doc.data() });
+      });
+      setReps(repsData);
+
+      // Load quarters from quarters collection
+      const quartersSnapshot = await getDocs(collection(db, 'quarters'));
+      const quartersData: string[] = [];
+      quartersSnapshot.forEach((doc) => {
+        const code = doc.data().code;
+        // Normalize format to 'Q# YYYY'
+        const normalized = code.replace('-', ' ');
+        quartersData.push(normalized);
+      });
+      
+      const sortedQuarters = quartersData.sort();
+      setQuarters(sortedQuarters);
+      
+      // Set default to most recent quarter
+      if (sortedQuarters.length > 0) {
+        setSelectedQuarter(sortedQuarters[sortedQuarters.length - 1]);
+      }
+      
+      console.log('Available quarters:', sortedQuarters);
+
+      // Load entries
+      await loadEntries(userId);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast.error('Failed to load data');
+    }
+  };
+
+  const loadEntries = async (userId: string) => {
+    if (!selectedQuarter) return;
+    
+    try {
+      const entriesRef = collection(db, 'commission_entries');
+      const snapshot = await getDocs(entriesRef);
+      const entriesData: CommissionEntry[] = [];
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        
+        // Normalize quarter format for comparison
+        const entryQuarter = data.quarterId?.replace('-', ' ');
+        const matchesQuarter = entryQuarter === selectedQuarter;
+        
+        // For admins: show all entries or filtered by rep
+        // For non-admins: show only their entries
+        const matchesRep = isAdmin 
+          ? (filterRep === 'all' || data.repId === filterRep)
+          : data.repId === userId;
+        
+        if (matchesQuarter && matchesRep) {
+          entriesData.push({
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date(),
+          } as CommissionEntry);
+        }
+      });
+      
+      entriesData.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      setEntries(entriesData);
+      console.log('Loaded entries:', entriesData.length, 'Quarter:', selectedQuarter);
+    } catch (error) {
+      console.error('Error loading entries:', error);
+      toast.error('Failed to load entries');
+    }
+  };
+
+  const createNewEntry = async () => {
+    if (!user || !config) return;
+
+    // For admins, prompt to select a rep
+    let selectedRepId = user.uid;
+    
+    if (isAdmin && reps.length > 0) {
+      const repOptions = reps.map((r, i) => (i + 1) + '. ' + r.name + ' (' + r.title + ')').join('\n');
+      const repSelection = prompt('Select a rep by entering their number:\n\n' + repOptions);
+      
+      if (!repSelection) return; // User cancelled
+      
+      const repIndex = parseInt(repSelection) - 1;
+      if (repIndex >= 0 && repIndex < reps.length) {
+        selectedRepId = reps[repIndex].id;
+      } else {
+        toast.error('Invalid selection. Using first rep.');
+        selectedRepId = reps[0].id;
+      }
+    }
+
+    try {
+      const newEntry: Partial<CommissionEntry> = {
+        quarterId: selectedQuarter,
+        repId: selectedRepId,
+        bucketCode: 'A',
+        goalValue: 0,
+        actualValue: 0,
+        attainment: 0,
+        bucketMax: 0,
+        payout: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const docRef = await addDoc(collection(db, 'commission_entries'), {
+        ...newEntry,
+        createdAt: Timestamp.fromDate(newEntry.createdAt!),
+        updatedAt: Timestamp.fromDate(newEntry.updatedAt!),
+      });
+
+      toast.success('Entry created');
+      await loadEntries(user.uid);
+    } catch (error) {
+      console.error('Error creating entry:', error);
+      toast.error('Failed to create entry');
+    }
+  };
+
+  const updateEntry = async (entryId: string, updates: Partial<CommissionEntry>) => {
+    if (!config) return;
+
+    try {
+      // Recalculate if goal or actual changed
+      const entry = entries.find(e => e.id === entryId);
+      if (!entry) return;
+
+      const bucket = config.buckets.find(b => b.code === entry.bucketCode);
+      if (!bucket) return;
+
+      let subWeight: number | undefined;
+      if (entry.bucketCode === 'B' && entry.subGoalId) {
+        const product = products.find(p => p.id === entry.subGoalId);
+        subWeight = product?.subWeight;
+      } else if (entry.bucketCode === 'D' && entry.subGoalId) {
+        const activity = activities.find(a => a.id === entry.subGoalId);
+        subWeight = activity?.subWeight;
+      }
+
+      const goalValue = updates.goalValue ?? entry.goalValue;
+      const actualValue = updates.actualValue ?? entry.actualValue;
+
+      const result = calculatePayout({
+        goalValue,
+        actualValue,
+        maxBonus: config.maxBonusPerRep,
+        bucketWeight: bucket.weight,
+        subWeight,
+        minAttainment: config.minAttainment,
+        maxAttainment: config.overPerfCap,
+      });
+
+      const finalUpdates = {
+        ...updates,
+        attainment: result.attainment,
+        bucketMax: result.bucketMax,
+        payout: result.payout,
+        updatedAt: Timestamp.fromDate(new Date()),
+      };
+
+      await updateDoc(doc(db, 'commission_entries', entryId), finalUpdates);
+      
+      // Reload entries to show updated data
+      if (user) {
+        await loadEntries(user.uid);
+      }
+      
+      toast.success('Entry updated');
+    } catch (error) {
+      console.error('Error updating entry:', error);
+      toast.error('Failed to update entry');
+    }
+  };
+
+  const deleteEntry = async (entryId: string) => {
+    if (!isAdmin) {
+      toast.error('Admin access required');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to delete this entry? This cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'commission_entries', entryId));
+      toast.success('Entry deleted');
+      await loadEntries(user.uid);
+    } catch (error) {
+      console.error('Error deleting entry:', error);
+      toast.error('Failed to delete entry');
+    }
+  };
+
+  const handleBulkUpload = async (csvText: string) => {
+    if (!isAdmin || !config) {
+      toast.error('Admin access required');
+      return;
+    }
+
+    try {
+      const lines = csvText.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim());
+      
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        
+        if (values.length < 5) continue; // Skip invalid rows
+
+        const [quarterId, repId, bucketCode, goalValue, actualValue, subGoalId, notes] = values;
+
+        try {
+          const bucket = config.buckets.find(b => b.code === bucketCode);
+          if (!bucket) {
+            console.error('Invalid bucket code: ' + bucketCode);
+            errorCount++;
+            continue;
+          }
+
+          const goal = parseFloat(goalValue) || 0;
+          const actual = parseFloat(actualValue) || 0;
+
+          const result = calculatePayout({
+            goalValue: goal,
+            actualValue: actual,
+            maxBonus: config.maxBonusPerRep,
+            bucketWeight: bucket.weight,
+            minAttainment: config.minAttainment,
+            maxAttainment: config.overPerfCap,
+          });
+
+          await addDoc(collection(db, 'commission_entries'), {
+            quarterId: quarterId.replace('-', ' '),
+            repId,
+            bucketCode,
+            goalValue: goal,
+            actualValue: actual,
+            attainment: result.attainment,
+            bucketMax: result.bucketMax,
+            payout: result.payout,
+            subGoalId: subGoalId || null,
+            notes: notes || '',
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+          });
+
+          successCount++;
+        } catch (error) {
+          console.error('Error importing row ' + i + ':', error);
+          errorCount++;
+        }
+      }
+
+      toast.success('Imported ' + successCount + ' entries. ' + errorCount + ' errors.');
+      setShowUploadModal(false);
+      await loadEntries(user.uid);
+    } catch (error) {
+      console.error('Error bulk uploading:', error);
+      toast.error('Failed to upload CSV');
+    }
+  };
+
+  const addQuarter = async () => {
+    if (!isAdmin) {
+      toast.error('Admin access required');
+      return;
+    }
+
+    // Get the latest quarter and suggest next
+    const latestQuarter = quarters[quarters.length - 1];
+    let suggestedQuarter = 'Q1 2025';
+    
+    if (latestQuarter) {
+      const match = latestQuarter.match(/Q(\d) (\d{4})/);
+      if (match) {
+        const q = parseInt(match[1]);
+        const year = parseInt(match[2]);
+        const nextQ = q === 4 ? 1 : q + 1;
+        const nextYear = q === 4 ? year + 1 : year;
+        suggestedQuarter = 'Q' + nextQ + ' ' + nextYear;
+      }
+    }
+
+    const newQuarter = prompt('Enter new quarter (format: Q# YYYY):', suggestedQuarter);
+    if (!newQuarter) return;
+
+    // Validate format
+    if (!/^Q[1-4] \d{4}$/.test(newQuarter)) {
+      toast.error('Invalid format. Use Q# YYYY (e.g., Q1 2025)');
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'quarters'), {
+        code: newQuarter,
+        createdAt: Timestamp.now()
+      });
+      
+      toast.success('Quarter ' + newQuarter + ' added');
+      setQuarters([...quarters, newQuarter].sort());
+      setSelectedQuarter(newQuarter);
+    } catch (error) {
+      console.error('Error adding quarter:', error);
+      toast.error('Failed to add quarter');
+    }
+  };
+
+  const getStatusClass = (attainment: number): string => {
+    if (attainment >= 1.0) return 'status-hit';
+    if (attainment >= 0.75) return 'status-close';
+    return 'status-low';
+  };
+  
+  const getStatusIcon = (attainment: number) => {
+    if (attainment >= 1.0) return '✓';
+    if (attainment >= 0.75) return '→';
+    return '⚠';
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="spinner border-primary-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => router.push('/dashboard')}
+                className="mr-4 text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft className="w-6 h-6" />
+              </button>
+              <DatabaseIcon className="w-8 h-8 text-primary-600 mr-3" />
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">Commission Database</h1>
+                <p className="text-sm text-gray-600">View and manage quarterly commission data</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-3">
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={addQuarter}
+                    className="btn btn-secondary flex items-center"
+                  >
+                    <Calendar className="w-4 h-4 mr-2" />
+                    Add Quarter
+                  </button>
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="btn btn-secondary flex items-center"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Bulk Upload
+                  </button>
+                </>
+              )}
+              <button
+                onClick={createNewEntry}
+                className="btn btn-primary flex items-center"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                New Entry
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        {/* Filters */}
+        <div className="card mb-6">
+          <div className="flex items-center space-x-4">
+            <Filter className="w-5 h-5 text-gray-600" />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Quarter
+              </label>
+              <select
+                value={selectedQuarter}
+                onChange={(e) => setSelectedQuarter(e.target.value)}
+                className="input"
+              >
+                {quarters.map(q => (
+                  <option key={q} value={q}>{q}</option>
+                ))}
+              </select>
+            </div>
+            {isAdmin && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rep
+                </label>
+                <select
+                  value={filterRep}
+                  onChange={(e) => setFilterRep(e.target.value)}
+                  className="input"
+                >
+                  <option value="all">All Reps</option>
+                  {/* TODO: Load from reps collection */}
+                </select>
+              </div>
+            )}
+            <div className="flex-1"></div>
+            <button className="btn btn-secondary flex items-center">
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </button>
+          </div>
+        </div>
+
+        {/* Warning Banner */}
+        <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+          <p className="text-sm text-yellow-800">
+            <strong>Note:</strong> Attainment, Bucket Max, and Payout are automatically calculated. 
+            Do not manually edit these fields.
+          </p>
+        </div>
+
+        {/* Entries Table */}
+        <div className="card overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[100px]">Quarter</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[150px]">Rep</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[180px]">Bucket</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[180px]">Sub-Goal</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[120px]">Goal Value</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[120px]">Actual Value</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[120px]">Attainment %</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[120px]">Bucket Max $</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[100px]">Payout $</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[100px]">Status</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[150px]">Notes</th>
+                {isAdmin && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 min-w-[80px]">Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {entries.length === 0 ? (
+                <tr>
+                  <td colSpan={isAdmin ? 12 : 11} className="text-center text-gray-500 py-8">
+                    No entries found. Click &quot;New Entry&quot; to add data.
+                  </td>
+                </tr>
+              ) : (
+                entries.map((entry) => {
+                  const rep = reps.find(r => r.id === entry.repId);
+                  const repName = rep?.name || 'Select Rep';
+                  
+                  return (
+                  <tr key={entry.id} className="border-b border-gray-200 hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm">{entry.quarterId?.replace('-', ' ')}</td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={entry.repId || ''}
+                        onChange={(e) => updateEntry(entry.id, { repId: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="">-- Select Rep --</option>
+                        {reps.map(r => (
+                          <option key={r.id} value={r.id}>{r.name} ({r.title})</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={entry.bucketCode}
+                        onChange={(e) => updateEntry(entry.id, { 
+                          bucketCode: e.target.value as 'A' | 'B' | 'C' | 'D' 
+                        })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="A">A - New Business</option>
+                        <option value="B">B - Product Mix</option>
+                        <option value="C">C - Maintain Business</option>
+                        <option value="D">D - Effort</option>
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      {(entry.bucketCode === 'B' || entry.bucketCode === 'D') ? (
+                        <select
+                          value={entry.subGoalId || ''}
+                          onChange={(e) => updateEntry(entry.id, { subGoalId: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        >
+                          <option value="">Select...</option>
+                          {entry.bucketCode === 'B' && products.map(p => (
+                            <option key={p.id} value={p.id}>{p.sku}</option>
+                          ))}
+                          {entry.bucketCode === 'D' && activities.map(a => (
+                            <option key={a.id} value={a.id}>{a.activity}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-gray-400 text-sm">N/A</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        value={entry.goalValue}
+                        onChange={(e) => updateEntry(entry.id, { goalValue: Number(e.target.value) })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        value={entry.actualValue}
+                        onChange={(e) => updateEntry(entry.id, { actualValue: Number(e.target.value) })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-medium text-sm">
+                      {formatAttainment(entry.attainment || 0)}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-sm">
+                      {formatCurrency(entry.bucketMax || 0)}
+                    </td>
+                    <td className="px-4 py-3 font-bold text-primary-600 text-sm">
+                      {formatCurrency(entry.payout || 0)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${
+                        getStatusClass(entry.attainment || 0)
+                      }`}>
+                        {getStatusIcon(entry.attainment || 0)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="text"
+                        value={entry.notes || ''}
+                        onChange={(e) => updateEntry(entry.id, { notes: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        placeholder="Notes..."
+                      />
+                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => deleteEntry(entry.id)}
+                          className="text-red-600 hover:text-red-800 hover:bg-red-50 p-2 rounded transition-colors"
+                          title="Delete entry"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Summary */}
+        {entries.length > 0 && (
+          <div className="mt-6 card">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quarter Summary</h3>
+            <div className="grid md:grid-cols-4 gap-6">
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Total Entries</p>
+                <p className="text-2xl font-bold text-gray-900">{entries.length}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Total Payout</p>
+                <p className="text-2xl font-bold text-primary-600">
+                  {formatCurrency(entries.reduce((sum, e) => sum + (e.payout || 0), 0))}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Avg Attainment</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {formatAttainment(
+                    entries.reduce((sum, e) => sum + (e.attainment || 0), 0) / entries.length
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Budget Utilization</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {formatAttainment(
+                    entries.reduce((sum, e) => sum + (e.payout || 0), 0) / (config?.maxBonusPerRep || 25000)
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bulk Upload Modal */}
+        {showUploadModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Bulk Upload Commission Data</h2>
+              
+              <div className="mb-4">
+                <p className="text-sm text-gray-600 mb-2">
+                  Upload a CSV file with the following columns:
+                </p>
+                <div className="bg-gray-50 p-3 rounded text-xs font-mono">
+                  quarterId, repId, bucketCode, goalValue, actualValue, subGoalId (optional), notes (optional)
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  <strong>Example:</strong> Q4 2025, Giz2uYXnSjUIGGbXWFfT, A, 100000, 95000, , Great performance
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select CSV File
+                </label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = async (event) => {
+                        const text = event.target?.result as string;
+                        await handleBulkUpload(text);
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowUploadModal(false)}
+                  className="btn btn-secondary"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

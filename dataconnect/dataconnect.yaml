@@ -1,0 +1,13 @@
+specVersion: "v1"
+serviceId: "copper-goals-tracker"
+location: "us-west1"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "kanvaportal_goals_db"
+      cloudSql:
+        instanceId: "kanva-instance"
+        # schemaValidation: "STRICT"     # STRICT mode makes Postgres schema match Data Connect exactly.
+        # schemaValidation: "COMPATIBLE" # COMPATIBLE mode makes Postgres schema compatible with Data Connect.
+connectorDirs: ["./default-2","./default"]
