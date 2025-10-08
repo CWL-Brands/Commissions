@@ -41,31 +41,32 @@ export interface CommissionResults {
  */
 async function getRepStatus(fishbowlUsername: string): Promise<{ isActive: boolean; isCommissioned: boolean }> {
   if (!adminDb) {
-    return { isActive: false, isCommissioned: false };
+    return { isActive: true, isCommissioned: true }; // Default to true if no DB
   }
 
   try {
-    // Query sales_reps collection by fishbowlUsername
+    // Query reps collection by salesPerson field (Fishbowl username)
     const repsSnapshot = await adminDb
-      .collection('sales_reps')
-      .where('fishbowlUsername', '==', fishbowlUsername)
+      .collection('reps')
+      .where('salesPerson', '==', fishbowlUsername)
       .limit(1)
       .get();
 
     if (repsSnapshot.empty) {
-      // Default: if not in database, assume active and commissioned (for backwards compatibility)
-      console.warn(`Rep ${fishbowlUsername} not found in sales_reps collection`);
+      // Default: if not in database, assume active and commissioned
+      console.warn(`Rep with salesPerson=${fishbowlUsername} not found in reps collection - defaulting to active/commissioned`);
       return { isActive: true, isCommissioned: true };
     }
 
     const repData = repsSnapshot.docs[0].data();
     return {
       isActive: repData.isActive ?? true,
-      isCommissioned: repData.isCommissioned ?? false,
+      isCommissioned: repData.isCommissioned ?? true, // Default to true
     };
   } catch (error) {
     console.error(`Error checking rep status for ${fishbowlUsername}:`, error);
-    return { isActive: false, isCommissioned: false };
+    // On error, default to true so calculations can proceed
+    return { isActive: true, isCommissioned: true };
   }
 }
 
@@ -312,6 +313,48 @@ export async function saveCommissionResults(
   });
 
   await batch.commit();
+}
+
+/**
+ * Get email from Fishbowl username (reverse mapping)
+ */
+function getEmailFromFishbowlUsername(fishbowlUsername: string): string | null {
+  const usernameToEmailMap: Record<string, string> = {
+    // Active Sales Reps
+    'BenW': 'ben@kanvabotanicals.com',
+    'BrandonG': 'brandon@kanvabotanicals.com',
+    'JSimmons': 'joe@kanvabotanicals.com',
+    'DerekW': 'derek@kanvabotanicals.com',
+    'Jared': 'jared@funktdistro.com',
+    'Corey': 'corey@cwlbrands.com',
+    'John': 'john@cwlbrands.com',
+    'Josie': 'josie@cwlbrands.com',
+    'Cori': 'cori@cwlbrands.com',
+    
+    // Operations & Admin
+    'admin': 'rob@cwlbrands.com',
+    'tthomas': 'trina@cwlbrands.com',
+    'Brian': 'operations@cwlbrands.com',
+    'CrystalD': 'crystal@cwlbrands.com',
+    'Zalak': 'zz@cwlbrands.com',
+    
+    // Other Staff
+    'Sergio': 'sergio@kanvabotanicals.com',
+    'Kevin': 'kevin@cwlbrands.com',
+    'Ethan25': 'ethan@cwlbrands.com',
+    'LydiaN': 'lydia@cwlbrands.com',
+    'MarllynC': 'marllyn@cwlbrands.com',
+    'Rebecca': 'rebecca@cwlbrands.com',
+    'bbarker': 'bryan.barker@cwlbrands.com',
+    
+    // Inactive/Former
+    'mcraft': 'matt@cwlbrands.com',
+    'JoshC': 'josh@kanvabotanicals.com',
+    'Shane-Inactive': 'shane@kanvabotanicals.com',
+    'Ryan': 'ryan@cwlbrands.com',
+  };
+
+  return usernameToEmailMap[fishbowlUsername] || null;
 }
 
 /**

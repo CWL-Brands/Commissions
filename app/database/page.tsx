@@ -593,7 +593,9 @@ export default function DatabasePage() {
                   className="input"
                 >
                   <option value="all">All Reps</option>
-                  {/* TODO: Load from reps collection */}
+                  {reps.filter(r => r.active).map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
                 </select>
               </div>
             )}
@@ -647,66 +649,38 @@ export default function DatabasePage() {
                   return (
                   <tr key={entry.id} className="border-b border-gray-200 hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm">{entry.quarterId?.replace('-', ' ')}</td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={entry.repId || ''}
-                        onChange={(e) => updateEntry(entry.id, { repId: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="">-- Select Rep --</option>
-                        {reps.map(r => (
-                          <option key={r.id} value={r.id}>{r.name} ({r.title})</option>
-                        ))}
-                      </select>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                      {repName}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-primary-100 text-primary-800">
+                        {entry.bucketCode === 'A' && 'A - New Business'}
+                        {entry.bucketCode === 'B' && 'B - Product Mix'}
+                        {entry.bucketCode === 'C' && 'C - Maintain Business'}
+                        {entry.bucketCode === 'D' && 'D - Effort'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {entry.subGoalLabel || <span className="text-gray-400">N/A</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <select
-                        value={entry.bucketCode}
-                        onChange={(e) => updateEntry(entry.id, { 
-                          bucketCode: e.target.value as 'A' | 'B' | 'C' | 'D' 
-                        })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="A">A - New Business</option>
-                        <option value="B">B - Product Mix</option>
-                        <option value="C">C - Maintain Business</option>
-                        <option value="D">D - Effort</option>
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      {(entry.bucketCode === 'B' || entry.bucketCode === 'D') ? (
-                        <select
-                          value={entry.subGoalId || ''}
-                          onChange={(e) => updateEntry(entry.id, { subGoalId: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        >
-                          <option value="">Select...</option>
-                          {entry.bucketCode === 'B' && products.map(p => (
-                            <option key={p.id} value={p.id}>{p.sku}</option>
-                          ))}
-                          {entry.bucketCode === 'D' && activities.map(a => (
-                            <option key={a.id} value={a.id}>{a.activity}</option>
-                          ))}
-                        </select>
+                      {isAdmin ? (
+                        <div className="flex items-center">
+                          <span className="text-gray-600 mr-1">$</span>
+                          <input
+                            type="number"
+                            value={entry.goalValue}
+                            onChange={(e) => updateEntry(entry.id, { goalValue: Number(e.target.value) })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            placeholder="0"
+                          />
+                        </div>
                       ) : (
-                        <span className="text-gray-400 text-sm">N/A</span>
+                        <span className="text-sm font-medium">{formatCurrency(entry.goalValue)}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        value={entry.goalValue}
-                        onChange={(e) => updateEntry(entry.id, { goalValue: Number(e.target.value) })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        value={entry.actualValue}
-                        onChange={(e) => updateEntry(entry.id, { actualValue: Number(e.target.value) })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                      {formatCurrency(entry.actualValue)}
                     </td>
                     <td className="px-4 py-3 font-medium text-sm">
                       {formatAttainment(entry.attainment || 0)}

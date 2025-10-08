@@ -706,6 +706,7 @@ export default function SettingsPage() {
                   <th>Name</th>
                   <th>Title</th>
                   <th>Email</th>
+                  <th>Sales Person</th>
                   <th>Start Date</th>
                   <th>Active</th>
                   <th>Notes</th>
@@ -756,6 +757,20 @@ export default function SettingsPage() {
                         }}
                         className="input"
                         placeholder="email@kanvabotanicals.com"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={rep.salesPerson || ''}
+                        onChange={(e) => {
+                          const newReps = [...reps];
+                          newReps[index].salesPerson = e.target.value;
+                          setReps(newReps);
+                        }}
+                        className="input"
+                        placeholder="BenW, BrandonG, etc."
+                        title="Fishbowl username for commission tracking"
                       />
                     </td>
                     <td>
