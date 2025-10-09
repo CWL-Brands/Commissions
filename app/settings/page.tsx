@@ -38,8 +38,7 @@ export default function SettingsPage() {
     maxBonusPerRep: 25000,
     overPerfCap: 125,
     minAttainment: 75,
-    productSubGoals: [],
-    activitySubGoals: [],
+    buckets: [],
     roleScales: [
       { role: 'Sr. Account Executive', percentage: 1.0 },
       { role: 'Account Executive', percentage: 0.85 },
