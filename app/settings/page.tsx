@@ -731,171 +731,16 @@ export default function SettingsPage() {
               <p className="text-xs text-gray-500 mt-1">Default: 75%</p>
             </div>
           </div>
-        </div>
-
-        {/* Sales Team Roster */}
-        <div className="card mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Sales Team Roster</h2>
-            <div className="flex space-x-2">
-              <button
-                onClick={addRep}
-                className="btn btn-secondary flex items-center"
-              >
-                <UserPlus className="w-4 h-4 mr-2" />
-                Add Rep
-              </button>
-              <button
-                onClick={handleSaveReps}
-                disabled={saving}
-                className="btn btn-primary flex items-center"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Save Reps
-              </button>
+          
+          {/* Total Quarterly Bonus Budget */}
+          <div className="mt-4 p-4 bg-primary-50 border border-primary-200 rounded-lg flex items-center justify-between">
+            <div>
+              <span className="text-sm font-medium text-gray-700">Total Quarterly Bonus Budget</span>
+              <p className="text-xs text-gray-500 mt-1">
+                {reps.filter(r => r.active).length} active reps × ${config.maxBonusPerRep.toLocaleString()} max bonus
+              </p>
             </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Title</th>
-                  <th>Email</th>
-                  <th>Sales Person</th>
-                  <th>Start Date</th>
-                  <th>Active</th>
-                  <th>Notes</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {reps.map((rep, index) => (
-                  <tr key={rep.id}>
-                    <td>
-                      <input
-                        type="text"
-                        value={rep.name}
-                        onChange={(e) => {
-                          const newReps = [...reps];
-                          newReps[index].name = e.target.value;
-                          setReps(newReps);
-                        }}
-                        className="input"
-                        placeholder="Rep Name"
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={rep.title}
-                        onChange={(e) => {
-                          const newReps = [...reps];
-                          newReps[index].title = e.target.value;
-                          setReps(newReps);
-                        }}
-                        className="input"
-                      >
-                        <option value="Account Executive">Account Executive</option>
-                        <option value="Jr. Account Executive">Jr. Account Executive</option>
-                        <option value="Sr. Account Executive">Sr. Account Executive</option>
-                        <option value="Account Manager">Account Manager</option>
-                        <option value="Sales Manager">Sales Manager</option>
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="email"
-                        value={rep.email}
-                        onChange={(e) => {
-                          const newReps = [...reps];
-                          newReps[index].email = e.target.value;
-                          setReps(newReps);
-                        }}
-                        className="input"
-                        placeholder="email@kanvabotanicals.com"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={rep.salesPerson || ''}
-                        onChange={(e) => {
-                          const newReps = [...reps];
-                          newReps[index].salesPerson = e.target.value;
-                          setReps(newReps);
-                        }}
-                        className="input"
-                        placeholder="BenW, BrandonG, etc."
-                        title="Fishbowl username for commission tracking"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="date"
-                        value={
-                          rep.startDate 
-                            ? (rep.startDate.toDate ? rep.startDate.toDate().toISOString().split('T')[0] : 
-                               rep.startDate instanceof Date ? rep.startDate.toISOString().split('T')[0] : 
-                               rep.startDate)
-                            : ''
-                        }
-                        onChange={(e) => {
-                          const newReps = [...reps];
-                          newReps[index].startDate = new Date(e.target.value);
-                          setReps(newReps);
-                        }}
-                        className="input"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={rep.active}
-                        onChange={(e) => {
-                          const newReps = [...reps];
-                          newReps[index].active = e.target.checked;
-                          setReps(newReps);
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={rep.notes || ''}
-                        onChange={(e) => {
-                          const newReps = [...reps];
-                          newReps[index].notes = e.target.value;
-                          setReps(newReps);
-                        }}
-                        className="input"
-                        placeholder="Optional notes"
-                      />
-                    </td>
-                    <td>
-                      <button
-                        onClick={() => removeRep(rep.id)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-4 p-3 bg-gray-50 rounded-md flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Active Reps:</span>
-            <span className="text-lg font-bold text-primary-600">
-              {reps.filter(r => r.active).length}
-            </span>
-          </div>
-
-          <div className="mt-4 p-3 bg-gray-50 rounded-md flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Total Quarterly Budget:</span>
-            <span className="text-lg font-bold text-primary-600">
+            <span className="text-2xl font-bold text-primary-600">
               ${(config.maxBonusPerRep * reps.filter(r => r.active).length).toLocaleString()}
             </span>
           </div>
@@ -1588,6 +1433,16 @@ export default function SettingsPage() {
                         <input
                           type="checkbox"
                           checked={commissionRates.specialRules.repTransfer.enabled}
+                          onChange={(e) => setCommissionRates({
+                            ...commissionRates,
+                            specialRules: {
+                              ...commissionRates.specialRules,
+                              repTransfer: {
+                                ...commissionRates.specialRules.repTransfer,
+                                enabled: e.target.checked
+                              }
+                            }
+                          })}
                           className="mr-2"
                         />
                         <span className="text-sm text-gray-700">Enabled</span>
@@ -1711,16 +1566,164 @@ export default function SettingsPage() {
         {/* Sales Team Tab */}
         {activeTab === 'team' && (
           <div className="space-y-8">
+            {/* Sales Team Roster */}
             <div className="card">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Sales Team Management</h2>
-              <p className="text-gray-600 mb-4">
-                Manage your sales team roster, titles, and Fishbowl username mappings.
-              </p>
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-                <p className="text-sm text-blue-800">
-                  <strong>Note:</strong> Sales Team Roster has been moved to the main Settings page.
-                  This tab will contain additional team management features in the future.
-                </p>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Sales Team Roster</h2>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={addRep}
+                    className="btn btn-secondary flex items-center"
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Add Rep
+                  </button>
+                  <button
+                    onClick={handleSaveReps}
+                    disabled={saving}
+                    className="btn btn-primary flex items-center"
+                  >
+                    <Save className="w-4 h-4 mr-2" />
+                    Save Reps
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Title</th>
+                      <th>Email</th>
+                      <th>Sales Person</th>
+                      <th>Start Date</th>
+                      <th>Active</th>
+                      <th>Notes</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reps.map((rep, index) => (
+                      <tr key={rep.id}>
+                        <td>
+                          <input
+                            type="text"
+                            value={rep.name}
+                            onChange={(e) => {
+                              const newReps = [...reps];
+                              newReps[index].name = e.target.value;
+                              setReps(newReps);
+                            }}
+                            className="input"
+                            placeholder="Rep Name"
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={rep.title}
+                            onChange={(e) => {
+                              const newReps = [...reps];
+                              newReps[index].title = e.target.value;
+                              setReps(newReps);
+                            }}
+                            className="input"
+                          >
+                            <option value="Account Executive">Account Executive</option>
+                            <option value="Jr. Account Executive">Jr. Account Executive</option>
+                            <option value="Sr. Account Executive">Sr. Account Executive</option>
+                            <option value="Account Manager">Account Manager</option>
+                            <option value="Sales Manager">Sales Manager</option>
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            type="email"
+                            value={rep.email}
+                            onChange={(e) => {
+                              const newReps = [...reps];
+                              newReps[index].email = e.target.value;
+                              setReps(newReps);
+                            }}
+                            className="input"
+                            placeholder="email@kanvabotanicals.com"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={rep.salesPerson || ''}
+                            onChange={(e) => {
+                              const newReps = [...reps];
+                              newReps[index].salesPerson = e.target.value;
+                              setReps(newReps);
+                            }}
+                            className="input"
+                            placeholder="BenW, BrandonG, etc."
+                            title="Fishbowl username for commission tracking"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="date"
+                            value={
+                              rep.startDate 
+                                ? (rep.startDate.toDate ? rep.startDate.toDate().toISOString().split('T')[0] : 
+                                   rep.startDate instanceof Date ? rep.startDate.toISOString().split('T')[0] : 
+                                   rep.startDate)
+                                : ''
+                            }
+                            onChange={(e) => {
+                              const newReps = [...reps];
+                              newReps[index].startDate = new Date(e.target.value);
+                              setReps(newReps);
+                            }}
+                            className="input"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={rep.active}
+                            onChange={(e) => {
+                              const newReps = [...reps];
+                              newReps[index].active = e.target.checked;
+                              setReps(newReps);
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={rep.notes || ''}
+                            onChange={(e) => {
+                              const newReps = [...reps];
+                              newReps[index].notes = e.target.value;
+                              setReps(newReps);
+                            }}
+                            className="input"
+                            placeholder="Optional notes"
+                          />
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => removeRep(rep.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 p-3 bg-gray-50 rounded-md flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700">Active Reps:</span>
+                <span className="text-lg font-bold text-primary-600">
+                  {reps.filter(r => r.active).length}
+                </span>
               </div>
             </div>
           </div>
