@@ -100,6 +100,23 @@ export async function calculateCommissions(
     };
   }
 
+  // Load commission rules
+  const rulesDoc = await adminDb.collection('settings').doc('commission_rules').get();
+  const commissionRules = rulesDoc.exists ? rulesDoc.data() : { excludeShipping: true, useOrderValue: true };
+  console.log('Commission rules:', commissionRules);
+
+  // Load customer account types
+  const customersSnapshot = await adminDb.collection('fishbowl_customers').get();
+  const customersMap = new Map();
+  customersSnapshot.forEach(doc => {
+    const data = doc.data();
+    if (data.customerNum || data.customerId) {
+      const key = data.customerNum || data.customerId;
+      customersMap.set(key, data.accountType || 'Retail');
+    }
+  });
+  console.log(`Loaded ${customersMap.size} customers with account types`);
+
   // Query fishbowl_soitems for this rep and date range
   const itemsSnapshot = await adminDb
     .collection('fishbowl_soitems')
@@ -108,7 +125,28 @@ export async function calculateCommissions(
     .where('commissionDate', '<=', Timestamp.fromDate(endDate))
     .get();
 
-  const items = itemsSnapshot.docs.map(doc => doc.data());
+  let items = itemsSnapshot.docs.map(doc => doc.data());
+
+  // Filter out shipping items if rule enabled
+  if (commissionRules?.excludeShipping) {
+    const originalCount = items.length;
+    items = items.filter(item => item.product !== 'Shipping');
+    const filtered = originalCount - items.length;
+    if (filtered > 0) {
+      console.log(`Filtered out ${filtered} shipping line items`);
+    }
+  }
+
+  // Filter out Retail account items
+  const originalCount = items.length;
+  items = items.filter(item => {
+    const accountType = customersMap.get(item.customerId) || customersMap.get(item.customerNum) || 'Retail';
+    return accountType !== 'Retail';
+  });
+  const retailFiltered = originalCount - items.length;
+  if (retailFiltered > 0) {
+    console.log(`Filtered out ${retailFiltered} line items from Retail accounts`);
+  }
 
   if (items.length === 0) {
     return {
@@ -131,21 +169,29 @@ export async function calculateCommissions(
   // Identify new vs existing customers
   const newCustomers = await identifyNewCustomers(Array.from(customerIds), startDate);
 
+  // Helper function to get revenue value based on rules
+  const getRevenueValue = (item: any) => {
+    if (commissionRules?.useOrderValue) {
+      return item.orderValue || item.revenue || 0;
+    }
+    return item.revenue || 0;
+  };
+
   // Calculate New Business (Bucket A) - Revenue from new customers
   const newBusinessRevenue = items
     .filter(item => newCustomers.has(item.customerId))
-    .reduce((sum, item) => sum + (item.revenue || 0), 0);
+    .reduce((sum, item) => sum + getRevenueValue(item), 0);
 
   // Calculate Maintain Business (Bucket C) - Revenue from existing customers
   const maintainBusinessRevenue = items
     .filter(item => !newCustomers.has(item.customerId))
-    .reduce((sum, item) => sum + (item.revenue || 0), 0);
+    .reduce((sum, item) => sum + getRevenueValue(item), 0);
 
-  // Calculate Product Mix (Bucket B)
-  const productMix = calculateProductMix(items);
+  // Calculate Product Mix (Bucket B) - pass commission rules
+  const productMix = calculateProductMix(items, commissionRules);
 
   // Calculate totals
-  const totalRevenue = items.reduce((sum, item) => sum + (item.revenue || 0), 0);
+  const totalRevenue = items.reduce((sum, item) => sum + getRevenueValue(item), 0);
   const totalMargin = items.reduce((sum, item) => sum + (item.margin || 0), 0);
 
   return {
@@ -201,7 +247,15 @@ async function identifyNewCustomers(
 /**
  * Calculate product mix breakdown
  */
-function calculateProductMix(items: any[]): ProductMixBreakdown[] {
+function calculateProductMix(items: any[], commissionRules?: any): ProductMixBreakdown[] {
+  // Helper function to get revenue value based on rules
+  const getRevenueValue = (item: any) => {
+    if (commissionRules?.useOrderValue) {
+      return item.orderValue || item.revenue || 0;
+    }
+    return item.revenue || 0;
+  };
+
   // Group by product number
   const productMap = new Map<string, {
     product: string;
@@ -227,14 +281,14 @@ function calculateProductMix(items: any[]): ProductMixBreakdown[] {
       product: existing.product,
       category1: existing.category1,
       category2: existing.category2,
-      revenue: existing.revenue + (item.revenue || 0),
+      revenue: existing.revenue + getRevenueValue(item),
       margin: existing.margin + (item.margin || 0),
       quantity: existing.quantity + (item.quantity || 0),
     });
   });
 
   // Calculate total revenue for percentages
-  const totalRevenue = items.reduce((sum, item) => sum + (item.revenue || 0), 0);
+  const totalRevenue = items.reduce((sum, item) => sum + getRevenueValue(item), 0);
 
   // Convert to array and add percentages
   return Array.from(productMap.entries())
