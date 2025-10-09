@@ -18,7 +18,14 @@ import {
   Calendar,
   Calculator,
   Upload,
-  Database as DatabaseIcon
+  Database as DatabaseIcon,
+  Search,
+  Filter,
+  Users,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Lock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole, CommissionEntry } from '@/types';
@@ -116,6 +123,7 @@ export default function SettingsPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [selectedCity, setSelectedCity] = useState('all');
   const [selectedState, setSelectedState] = useState('all');
+  const [confirmAdminChange, setConfirmAdminChange] = useState<{ customerId: string; newRep: string; customerName: string } | null>(null);
 
   const loadQuarters = async () => {
     try {
@@ -281,7 +289,15 @@ export default function SettingsPage() {
       loadEntries(user.uid);
       loadMonthlyCommissions(user.uid);
     }
-  }, [activeTab, user, filterRep]);
+  }, [activeTab, user, filterRep, isAdmin]);
+
+  // Load customers when customers tab is active
+  useEffect(() => {
+    if (activeTab === 'customers' && isAdmin) {
+      console.log('Loading customers for Customers tab...');
+      loadCustomers();
+    }
+  }, [activeTab, isAdmin]);
 
   // Load commission rates when title changes
   useEffect(() => {
@@ -808,6 +824,200 @@ export default function SettingsPage() {
       toast.error('Failed to load monthly commissions');
     }
   };
+
+  const loadCustomers = async () => {
+    console.log('Loading customers...');
+    try {
+      // Load reps first to map salesPerson to rep names
+      const repsSnapshot = await getDocs(collection(db, 'reps'));
+      const repsMap = new Map();
+      repsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.salesPerson) {
+          repsMap.set(data.salesPerson, data.name);
+        }
+      });
+      console.log(`Loaded ${repsMap.size} reps for mapping`);
+
+      // Get customers and their sales rep from most recent order
+      const snapshot = await getDocs(collection(db, 'fishbowl_customers'));
+      console.log(`Found ${snapshot.size} customers in Firestore`);
+      
+      // Get sales rep for each customer from their orders
+      const ordersSnapshot = await getDocs(collection(db, 'fishbowl_sales_orders'));
+      const customerSalesRepMap = new Map();
+      ordersSnapshot.forEach(doc => {
+        const order = doc.data();
+        if (order.customerId && order.salesPerson) {
+          customerSalesRepMap.set(order.customerId, order.salesPerson);
+        }
+      });
+      console.log(`Mapped ${customerSalesRepMap.size} customers to sales reps from orders`);
+      
+      const customersData: any[] = [];
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const customerId = data.id || data.customerNum || doc.id;
+        const fishbowlUsername = customerSalesRepMap.get(customerId) || data.salesPerson || data.salesRep || '';
+        const repName = repsMap.get(fishbowlUsername) || fishbowlUsername || 'Unassigned';
+        
+        customersData.push({
+          id: doc.id,
+          customerNum: data.id || data.accountNumber?.toString() || doc.id,
+          customerName: data.name || data.customerContact || 'Unknown',
+          accountType: data.accountType || 'Retail',
+          salesPerson: repName,
+          fishbowlUsername: fishbowlUsername,
+          originalOwner: data.salesPerson || fishbowlUsername || 'Unassigned', // Original from Fishbowl
+          shippingCity: data.shippingCity || '',
+          shippingState: data.shippingState || ''
+        });
+      });
+      
+      // Sort by customer name
+      customersData.sort((a, b) => a.customerName.localeCompare(b.customerName));
+      
+      console.log('Loaded customers:', customersData.length);
+      console.log('Sample customer:', customersData[0]);
+      setCustomers(customersData);
+      setFilteredCustomers(customersData);
+    } catch (error) {
+      console.error('Error loading customers:', error);
+      toast.error('Failed to load customers');
+    }
+  };
+
+  const updateAccountType = async (customerId: string, newAccountType: string) => {
+    setSavingCustomer(customerId);
+    try {
+      const customerRef = doc(db, 'fishbowl_customers', customerId);
+      await updateDoc(customerRef, {
+        accountType: newAccountType
+      });
+      
+      // Update local state
+      setCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, accountType: newAccountType } : c
+      ));
+      setFilteredCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, accountType: newAccountType } : c
+      ));
+      
+      toast.success('Account type updated!');
+    } catch (error) {
+      console.error('Error updating account type:', error);
+      toast.error('Failed to update account type');
+    } finally {
+      setSavingCustomer(null);
+    }
+  };
+
+  // Check if a customer's sales rep should be locked (protected system accounts)
+  const isRepLocked = (originalOwner: string): { locked: boolean; reason: string } => {
+    const owner = originalOwner.toLowerCase();
+    
+    if (owner === 'shopify') {
+      return { locked: true, reason: 'SHOPIFY accounts are retail customers - do not modify' };
+    }
+    if (owner === 'shipstation') {
+      return { locked: true, reason: 'ShipStation system account - do not modify' };
+    }
+    // admin can be changed if needed, so not locked
+    return { locked: false, reason: '' };
+  };
+
+  const handleSalesRepChange = (customerId: string, newFishbowlUsername: string, originalOwner: string, customerName: string) => {
+    // If changing from admin, show confirmation
+    if (originalOwner.toLowerCase() === 'admin' && newFishbowlUsername.toLowerCase() !== 'admin') {
+      setConfirmAdminChange({ customerId, newRep: newFishbowlUsername, customerName });
+    } else {
+      // Proceed with update
+      updateSalesRep(customerId, newFishbowlUsername);
+    }
+  };
+
+  const confirmAdminRepChange = () => {
+    if (confirmAdminChange) {
+      updateSalesRep(confirmAdminChange.customerId, confirmAdminChange.newRep);
+      setConfirmAdminChange(null);
+    }
+  };
+
+  const updateSalesRep = async (customerId: string, newFishbowlUsername: string) => {
+    setSavingCustomer(customerId);
+    try {
+      const customerRef = doc(db, 'fishbowl_customers', customerId);
+      await updateDoc(customerRef, {
+        salesPerson: newFishbowlUsername
+      });
+      
+      // Update local state
+      const repName = reps.find(r => r.salesPerson === newFishbowlUsername)?.name || newFishbowlUsername || 'Unassigned';
+      setCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, salesPerson: repName, fishbowlUsername: newFishbowlUsername } : c
+      ));
+      setFilteredCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, salesPerson: repName, fishbowlUsername: newFishbowlUsername } : c
+      ));
+      
+      toast.success('Sales rep updated!');
+    } catch (error) {
+      console.error('Error updating sales rep:', error);
+      toast.error('Failed to update sales rep');
+    } finally {
+      setSavingCustomer(null);
+    }
+  };
+
+  const handleSort = (field: 'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'shippingCity' | 'shippingState') => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Filter and sort customers
+  useEffect(() => {
+    if (activeTab !== 'customers') return;
+    
+    let filtered = customers;
+
+    if (searchTerm) {
+      filtered = filtered.filter(c => 
+        c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.customerNum.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    if (selectedRep !== 'all') {
+      filtered = filtered.filter(c => c.fishbowlUsername === selectedRep);
+    }
+
+    if (selectedAccountType !== 'all') {
+      filtered = filtered.filter(c => c.accountType === selectedAccountType);
+    }
+
+    if (selectedCity !== 'all') {
+      filtered = filtered.filter(c => c.shippingCity === selectedCity);
+    }
+
+    if (selectedState !== 'all') {
+      filtered = filtered.filter(c => c.shippingState === selectedState);
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      const aVal = a[sortField] || '';
+      const bVal = b[sortField] || '';
+      const comparison = aVal.toString().localeCompare(bVal.toString());
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    setFilteredCustomers(filtered);
+  }, [searchTerm, selectedRep, selectedAccountType, selectedCity, selectedState, customers, activeTab, sortField, sortDirection]);
 
   const handleBulkUpload = async (csvText: string) => {
     if (!isAdmin || !config || !user) {
@@ -1701,23 +1911,45 @@ export default function SettingsPage() {
         {/* Monthly Commissions Tab */}
         {activeTab === 'monthly' && (
           <div className="space-y-8">
-            {/* Calculate Monthly Commissions */}
-            <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Calculate Monthly Commissions</h3>
-                  <p className="text-sm text-gray-600">
-                    Process Fishbowl sales orders and calculate commissions based on configured rates
-                  </p>
+            {/* Upload and Calculate Section */}
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Upload Sales Orders */}
+              <div className="card bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">📤 Upload Sales Orders</h3>
+                    <p className="text-sm text-gray-600">
+                      Import Fishbowl sales order data (CSV)
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="btn btn-primary flex items-center"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload CSV
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowMonthYearModal(true)}
-                  disabled={saving}
-                  className="btn btn-success flex items-center"
-                >
-                  <Calculator className="w-4 h-4 mr-2" />
-                  {saving ? 'Calculating...' : 'Calculate Commissions'}
-                </button>
+              </div>
+
+              {/* Calculate Monthly Commissions */}
+              <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">💰 Calculate Commissions</h3>
+                    <p className="text-sm text-gray-600">
+                      Process orders and calculate commissions
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowMonthYearModal(true)}
+                    disabled={saving}
+                    className="btn btn-success flex items-center"
+                  >
+                    <Calculator className="w-4 h-4 mr-2" />
+                    {saving ? 'Calculating...' : 'Calculate'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2082,6 +2314,324 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Customers Tab */}
+        {activeTab === 'customers' && (
+          <div className="space-y-8">
+            {/* Stats Cards */}
+            <div className="grid md:grid-cols-4 gap-6">
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Total Customers</h3>
+                  <Users className="w-5 h-5 text-blue-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">{customers.length}</p>
+              </div>
+
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Retail</h3>
+                  <Filter className="w-5 h-5 text-yellow-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">
+                  {customers.filter(c => c.accountType === 'Retail').length}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">No commission</p>
+              </div>
+
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Wholesale</h3>
+                  <Users className="w-5 h-5 text-green-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">
+                  {customers.filter(c => c.accountType === 'Wholesale').length}
+                </p>
+              </div>
+
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Distributor</h3>
+                  <Users className="w-5 h-5 text-green-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">
+                  {customers.filter(c => c.accountType === 'Distributor').length}
+                </p>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Filters</h3>
+              <div className="grid md:grid-cols-5 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Search className="w-4 h-4 inline mr-1" />
+                    Search
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Customer name or #..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="input w-full"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Sales Rep</label>
+                  <select
+                    value={selectedRep}
+                    onChange={(e) => setSelectedRep(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="all">All Reps</option>
+                    {Array.from(new Set(customers.map(c => c.fishbowlUsername).filter(Boolean))).sort().map(rep => (
+                      <option key={rep} value={rep}>{rep}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Account Type</label>
+                  <select
+                    value={selectedAccountType}
+                    onChange={(e) => setSelectedAccountType(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="Retail">Retail</option>
+                    <option value="Wholesale">Wholesale</option>
+                    <option value="Distributor">Distributor</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">City</label>
+                  <select
+                    value={selectedCity}
+                    onChange={(e) => setSelectedCity(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="all">All Cities</option>
+                    {Array.from(new Set(customers.map(c => c.shippingCity).filter(Boolean))).sort().map(city => (
+                      <option key={city} value={city}>{city}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">State</label>
+                  <select
+                    value={selectedState}
+                    onChange={(e) => setSelectedState(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="all">All States</option>
+                    {Array.from(new Set(customers.map(c => c.shippingState).filter(Boolean))).sort().map(state => (
+                      <option key={state} value={state}>{state}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Customers Table */}
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Customers ({filteredCustomers.length})
+              </h3>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <div 
+                          className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
+                          onClick={() => handleSort('customerNum')}
+                        >
+                          <span>Customer #</span>
+                          {sortField === 'customerNum' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <div 
+                          className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
+                          onClick={() => handleSort('customerName')}
+                        >
+                          <span>Customer Name</span>
+                          {sortField === 'customerName' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
+                        <div 
+                          className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
+                          onClick={() => handleSort('accountType')}
+                        >
+                          <span>Account Type</span>
+                          {sortField === 'accountType' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <span>Current Owner</span>
+                        <span className="ml-1 text-xs text-gray-400">(Fishbowl)</span>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-56">
+                        <div 
+                          className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
+                          onClick={() => handleSort('salesPerson')}
+                        >
+                          <span>Assign Sales Rep</span>
+                          {sortField === 'salesPerson' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <div 
+                          className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
+                          onClick={() => handleSort('shippingCity')}
+                        >
+                          <span>City</span>
+                          {sortField === 'shippingCity' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredCustomers.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                          No customers found
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCustomers.map((customer) => (
+                        <tr key={customer.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{customer.customerNum}</td>
+                          <td className="px-4 py-3 text-sm text-gray-900">{customer.customerName}</td>
+                          <td className="px-4 py-3">
+                            {savingCustomer === customer.id ? (
+                              <div className="flex items-center space-x-2">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
+                                <span className="text-sm text-gray-600">Saving...</span>
+                              </div>
+                            ) : (
+                              <select
+                                value={customer.accountType}
+                                onChange={(e) => updateAccountType(customer.id, e.target.value)}
+                                className={`input text-sm ${
+                                  customer.accountType === 'Retail'
+                                    ? 'bg-yellow-50 border-yellow-300'
+                                    : customer.accountType === 'Wholesale'
+                                    ? 'bg-blue-50 border-blue-300'
+                                    : 'bg-green-50 border-green-300'
+                                }`}
+                              >
+                                <option value="Retail">Retail</option>
+                                <option value="Wholesale">Wholesale</option>
+                                <option value="Distributor">Distributor</option>
+                              </select>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-sm font-mono ${
+                              customer.originalOwner === 'Unassigned' || 
+                              customer.originalOwner === 'admin' || 
+                              customer.originalOwner === 'shopify' ||
+                              customer.originalOwner === 'house'
+                                ? 'text-gray-400 italic'
+                                : 'text-gray-700'
+                            }`}>
+                              {customer.originalOwner}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {(() => {
+                              const lockStatus = isRepLocked(customer.originalOwner);
+                              
+                              if (savingCustomer === customer.id) {
+                                return (
+                                  <div className="flex items-center space-x-2">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
+                                  </div>
+                                );
+                              }
+                              
+                              if (lockStatus.locked) {
+                                return (
+                                  <div className="flex items-center space-x-2">
+                                    <Lock className="w-4 h-4 text-red-500" />
+                                    <span className="text-sm text-gray-500 italic">
+                                      Protected
+                                    </span>
+                                    <div className="group relative">
+                                      <AlertCircle className="w-4 h-4 text-gray-400 cursor-help" />
+                                      <div className="hidden group-hover:block absolute z-10 w-64 p-2 bg-gray-900 text-white text-xs rounded shadow-lg -top-2 left-6">
+                                        {lockStatus.reason}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              
+                              return (
+                                <select
+                                  value={customer.fishbowlUsername || ''}
+                                  onChange={(e) => handleSalesRepChange(customer.id, e.target.value, customer.originalOwner, customer.customerName)}
+                                  className="input text-sm w-full"
+                                >
+                                  <option value="">Unassigned</option>
+                                  {reps.filter(r => r.active).map(rep => (
+                                    <option key={rep.id} value={rep.salesPerson}>
+                                      {rep.name} ({rep.salesPerson})
+                                    </option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{customer.shippingCity || '-'}</td>
+                          <td className="px-4 py-3">
+                            {customer.accountType === 'Retail' ? (
+                              <span className="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">
+                                ⚠ No Commission
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                                ✓ Active
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -2961,6 +3511,48 @@ export default function SettingsPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Change Confirmation Modal */}
+      {confirmAdminChange && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center space-x-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-yellow-600" />
+              <h2 className="text-xl font-bold text-gray-900">Confirm Admin Account Change</h2>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-gray-700 mb-3">
+                You are about to change the sales rep for an <strong>admin</strong> account:
+              </p>
+              <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-3">
+                <p className="text-sm font-medium text-gray-900">{confirmAdminChange.customerName}</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  Current Owner: <span className="font-mono">admin</span>
+                </p>
+              </div>
+              <p className="text-sm text-gray-600">
+                Are you sure you want to assign this account to a sales rep?
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setConfirmAdminChange(null)}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAdminRepChange}
+                className="btn bg-yellow-600 hover:bg-yellow-700 text-white"
+              >
+                Yes, Change Rep
+              </button>
             </div>
           </div>
         </div>
