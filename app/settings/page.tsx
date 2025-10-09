@@ -148,6 +148,16 @@ export default function SettingsPage() {
         repsData.push({ id: doc.id, ...doc.data() });
       });
       setReps(repsData);
+
+      // Load commission rates
+      const ratesDoc = await getDoc(doc(db, 'settings', 'commission_rates'));
+      if (ratesDoc.exists()) {
+        const ratesData = ratesDoc.data();
+        setCommissionRates(ratesData);
+        console.log('Loaded commission rates from Firestore');
+      } else {
+        console.log('No commission rates found, using defaults');
+      }
     } catch (error) {
       console.error('Error loading settings:', error);
       toast.error('Failed to load settings');
@@ -566,6 +576,20 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error saving reps:', error);
       toast.error('Failed to save sales reps');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveCommissionRates = async () => {
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'settings', 'commission_rates'), commissionRates);
+      toast.success('Commission rates saved successfully!');
+      console.log('Saved commission rates to Firestore:', commissionRates);
+    } catch (error) {
+      console.error('Error saving commission rates:', error);
+      toast.error('Failed to save commission rates');
     } finally {
       setSaving(false);
     }
@@ -1273,13 +1297,12 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <button
-                  onClick={() => {
-                    toast.success('Commission rates saved!');
-                  }}
+                  onClick={handleSaveCommissionRates}
+                  disabled={saving}
                   className="btn btn-primary flex items-center"
                 >
                   <Save className="w-4 h-4 mr-2" />
-                  Save Rates
+                  {saving ? 'Saving...' : 'Save Rates'}
                 </button>
               </div>
 
