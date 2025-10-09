@@ -199,7 +199,7 @@ export default function DatabasePage() {
     try {
       // Get rep name from reps collection
       const rep = reps.find(r => r.id === selectedRepId);
-      const repName = rep ? `${rep.firstName} ${rep.lastName}` : 'Unknown Rep';
+      const repName = rep ? rep.name : 'Unknown Rep';
 
       const newEntry: Partial<CommissionEntry> = {
         quarterId: selectedQuarter,
@@ -420,7 +420,7 @@ export default function DatabasePage() {
       // Calculate for each rep
       for (const rep of targetReps) {
         try {
-          toast.loading(`Calculating for ${rep.firstName} ${rep.lastName}... (${successCount + 1}/${targetReps.length})`, {
+          toast.loading(`Calculating for ${rep.name}... (${successCount + 1}/${targetReps.length})`, {
             id: loadingToast,
           });
 
@@ -442,10 +442,10 @@ export default function DatabasePage() {
             totalLineItems += data.results.lineItemCount || 0;
             successCount++;
           } else {
-            console.error(`Failed for ${rep.firstName} ${rep.lastName}:`, data.error);
+            console.error(`Failed for ${rep.name}:`, data.error);
           }
         } catch (repError) {
-          console.error(`Error calculating for ${rep.firstName} ${rep.lastName}:`, repError);
+          console.error(`Error calculating for ${rep.name}:`, repError);
         }
       }
 
