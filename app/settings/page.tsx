@@ -28,6 +28,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q4 2025');
   const [quarters, setQuarters] = useState<string[]>(['Q4 2025', 'Q1 2026']);
+  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'team'>('quarterly');
 
   // Configuration state
   const [config, setConfig] = useState<CommissionConfig>({
@@ -52,6 +53,30 @@ export default function SettingsPage() {
   const [products, setProducts] = useState<ProductSubGoal[]>([]);
   const [activities, setActivities] = useState<ActivitySubGoal[]>([]);
   const [reps, setReps] = useState<any[]>([]);
+  
+  // Monthly commission rates state
+  const [commissionRates, setCommissionRates] = useState<any>({
+    rates: [],
+    specialRules: {
+      repTransfer: {
+        enabled: true,
+        flatFee: 500,
+        percentFallback: 5.0,
+        useGreater: true
+      },
+      inactivityThreshold: 12
+    },
+    titles: [
+      "Account Executive",
+      "Jr. Account Executive",
+      "Account Manager",
+      "Sr. Account Executive"
+    ],
+    segments: [
+      { id: "distributor", name: "Distributor" },
+      { id: "wholesale", name: "Wholesale" }
+    ]
+  });
 
   const loadQuarters = async () => {
     try {
@@ -611,7 +636,48 @@ export default function SettingsPage() {
         </div>
       </header>
 
+      {/* Tab Navigation */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="container mx-auto px-4">
+          <nav className="flex space-x-8" aria-label="Tabs">
+            <button
+              onClick={() => setActiveTab('quarterly')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'quarterly'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Quarterly Bonus
+            </button>
+            <button
+              onClick={() => setActiveTab('monthly')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'monthly'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Monthly Commissions
+            </button>
+            <button
+              onClick={() => setActiveTab('team')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'team'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Sales Team
+            </button>
+          </nav>
+        </div>
+      </div>
+
       <div className="container mx-auto px-4 py-8 max-w-6xl">
+        {/* Quarterly Bonus Tab */}
+        {activeTab === 'quarterly' && (
+          <>
         {/* Global Settings */}
         <div className="card mb-8">
           <div className="flex items-center justify-between mb-6">
@@ -1346,6 +1412,50 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+          </>
+        )}
+
+        {/* Monthly Commissions Tab */}
+        {activeTab === 'monthly' && (
+          <div className="space-y-8">
+            <div className="card">
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">Monthly Commission Rates</h2>
+              <p className="text-gray-600 mb-4">
+                Configure commission rates based on rep title, customer segment, and customer status.
+              </p>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                <p className="text-sm text-yellow-800">
+                  <strong>Coming Soon:</strong> Monthly commission rate matrix will be available here.
+                  This will allow you to set different commission percentages based on:
+                </p>
+                <ul className="list-disc list-inside text-sm text-yellow-800 mt-2 space-y-1">
+                  <li>Rep Title (Account Executive, Jr. AE, etc.)</li>
+                  <li>Customer Segment (Distributor vs Wholesale)</li>
+                  <li>Customer Status (New, 6-Month Active, 12-Month Active)</li>
+                  <li>Special Rules (Rep Transfer, Inactivity Threshold)</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Sales Team Tab */}
+        {activeTab === 'team' && (
+          <div className="space-y-8">
+            <div className="card">
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">Sales Team Management</h2>
+              <p className="text-gray-600 mb-4">
+                Manage your sales team roster, titles, and Fishbowl username mappings.
+              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> Sales Team Roster has been moved to the main Settings page.
+                  This tab will contain additional team management features in the future.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
