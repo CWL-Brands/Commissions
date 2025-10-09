@@ -35,6 +35,23 @@ export async function POST(request: NextRequest) {
     }
     const commissionRates = ratesDoc.data();
 
+    // Get commission rules from settings
+    const rulesDoc = await adminDb.collection('settings').doc('commission_rules').get();
+    const commissionRules = rulesDoc.exists ? rulesDoc.data() : { excludeShipping: true, useOrderValue: true };
+    console.log('Commission rules:', commissionRules);
+
+    // Load all customers with account types
+    const customersSnapshot = await adminDb.collection('fishbowl_customers').get();
+    const customersMap = new Map();
+    customersSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.customerNum || data.customerId) {
+        const key = data.customerNum || data.customerId;
+        customersMap.set(key, { id: doc.id, ...data });
+      }
+    });
+    console.log(`Loaded ${customersMap.size} customers with account types`);
+
     // Get all reps
     const repsSnapshot = await adminDb.collection('reps').get();
     const repsMap = new Map();
@@ -85,6 +102,16 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // Get customer account type
+      const customer = customersMap.get(order.customerId) || customersMap.get(order.customerNum);
+      const accountType = customer?.accountType || 'Retail';
+      
+      // Skip Retail accounts (no commission)
+      if (accountType === 'Retail') {
+        console.log(`Skipping order ${order.num} - customer ${order.customerName} is Retail (no commission)`);
+        continue;
+      }
+
       // Get customer segment from Copper
       const customerSegment = await getCustomerSegment(order.customerId);
       
@@ -108,19 +135,22 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // Use orderValue or revenue based on rules
+      const orderAmount = commissionRules?.useOrderValue ? (order.orderValue || order.revenue) : order.revenue;
+
       // Calculate commission
       let commissionAmount = 0;
       if (customerStatus === 'rep_transfer') {
         const specialRule = commissionRates?.specialRules?.repTransfer;
         if (specialRule?.enabled) {
           const flatFee = specialRule.flatFee || 0;
-          const percentCommission = order.revenue * ((specialRule.percentFallback || 0) / 100);
+          const percentCommission = orderAmount * ((specialRule.percentFallback || 0) / 100);
           commissionAmount = specialRule.useGreater 
             ? Math.max(flatFee, percentCommission)
             : flatFee;
         }
       } else {
-        commissionAmount = order.revenue * (rate / 100);
+        commissionAmount = orderAmount * (rate / 100);
       }
 
       totalCommission += commissionAmount;
@@ -139,11 +169,13 @@ export async function POST(request: NextRequest) {
         orderNum: order.num,
         customerId: order.customerId,
         customerName: order.customerName,
+        accountType: accountType,
         
         customerSegment: customerSegment,
         customerStatus: customerStatus,
         
-        orderRevenue: order.revenue,
+        orderRevenue: commissionRules?.useOrderValue ? orderAmount : order.revenue,
+        orderValue: order.orderValue || order.revenue,
         commissionRate: rate,
         commissionAmount: commissionAmount,
         
@@ -154,7 +186,7 @@ export async function POST(request: NextRequest) {
         
         calculatedAt: new Date(),
         paidStatus: 'pending',
-        notes: `${customerStatus} - ${customerSegment}`
+        notes: `${accountType} - ${customerStatus} - ${customerSegment}`
       });
 
       // Track by rep
