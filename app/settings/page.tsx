@@ -125,6 +125,11 @@ export default function SettingsPage() {
   const [selectedState, setSelectedState] = useState('all');
   const [confirmAdminChange, setConfirmAdminChange] = useState<{ customerId: string; newRep: string; customerName: string } | null>(null);
 
+  // Fishbowl Import state
+  const [fishbowlFile, setFishbowlFile] = useState<File | null>(null);
+  const [fishbowlLoading, setFishbowlLoading] = useState(false);
+  const [fishbowlResult, setFishbowlResult] = useState<any>(null);
+
   const loadQuarters = async () => {
     try {
       const quartersSnapshot = await getDocs(collection(db, 'quarters'));
@@ -1080,6 +1085,50 @@ export default function SettingsPage() {
     }
   };
 
+  const handleFishbowlImport = async () => {
+    if (!fishbowlFile) {
+      toast.error('Please select a file to import');
+      return;
+    }
+
+    setFishbowlLoading(true);
+    setFishbowlResult(null);
+    const loadingToast = toast.loading('Importing Fishbowl data...');
+
+    try {
+      const formData = new FormData();
+      formData.append('file', fishbowlFile);
+
+      const response = await fetch('/api/fishbowl/import-unified', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Import failed');
+      }
+
+      setFishbowlResult(data);
+      setFishbowlFile(null);
+      
+      toast.success(
+        `✅ Imported ${data.stats.itemsCreated} line items, ${data.stats.customersCreated + data.stats.customersUpdated} customers, ${data.stats.ordersCreated + data.stats.ordersUpdated} orders!`,
+        { id: loadingToast, duration: 5000 }
+      );
+      
+      // Reload customers if on that tab
+      if (activeTab === 'customers') {
+        loadCustomers();
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to import data', { id: loadingToast });
+    } finally {
+      setFishbowlLoading(false);
+    }
+  };
+
   const handleCalculateMonthlyCommissions = async (month: string, year: number) => {
     setSaving(true);
     const loadingToast = toast.loading('Calculating monthly commissions...');
@@ -1911,45 +1960,110 @@ export default function SettingsPage() {
         {/* Monthly Commissions Tab */}
         {activeTab === 'monthly' && (
           <div className="space-y-8">
-            {/* Upload and Calculate Section */}
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Upload Sales Orders */}
-              <div className="card bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">📤 Upload Sales Orders</h3>
-                    <p className="text-sm text-gray-600">
-                      Import Fishbowl sales order data (CSV)
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="btn btn-primary flex items-center"
-                  >
-                    <Upload className="w-4 h-4 mr-2" />
-                    Upload CSV
-                  </button>
+            {/* Fishbowl Import Section */}
+            <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-300 rounded-lg shadow-lg p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-3xl">🐟</span>
+                <div>
+                  <h2 className="text-2xl font-bold text-purple-900">Fishbowl Data Import</h2>
+                  <p className="text-sm text-purple-700">Import Conversight report - Creates Customers, Orders, AND Line Items!</p>
                 </div>
               </div>
-
-              {/* Calculate Monthly Commissions */}
-              <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">💰 Calculate Commissions</h3>
-                    <p className="text-sm text-gray-600">
-                      Process orders and calculate commissions
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowMonthYearModal(true)}
-                    disabled={saving}
-                    className="btn btn-success flex items-center"
-                  >
-                    <Calculator className="w-4 h-4 mr-2" />
-                    {saving ? 'Calculating...' : 'Calculate'}
-                  </button>
+              
+              <div className="space-y-4">
+                <div className="p-4 bg-green-50 border border-green-300 rounded-lg">
+                  <p className="text-sm text-green-900 font-semibold">
+                    ✨ <strong>ONE UPLOAD = EVERYTHING!</strong>
+                  </p>
+                  <ul className="mt-2 text-sm text-green-800 space-y-1">
+                    <li>✅ Creates/updates Customers (with shipping city/state)</li>
+                    <li>✅ Creates/updates Sales Orders (with commission dates)</li>
+                    <li>✅ Creates Line Items (with Product, Revenue, Cost data)</li>
+                    <li>✅ All properly linked together!</li>
+                    <li>✅ Handles Excel dates automatically</li>
+                  </ul>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    📊 Conversight Export (CSV or Excel)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={(e) => setFishbowlFile(e.target.files?.[0] || null)}
+                    disabled={fishbowlLoading}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 disabled:opacity-50"
+                  />
+                  {fishbowlFile && (
+                    <p className="mt-2 text-sm text-green-600">
+                      ✅ Selected: {fishbowlFile.name} ({(fishbowlFile.size / 1024 / 1024).toFixed(1)} MB)
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleFishbowlImport}
+                  disabled={fishbowlLoading || !fishbowlFile}
+                  className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-4 rounded-lg hover:from-purple-700 hover:to-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-bold text-lg shadow-lg"
+                >
+                  {fishbowlLoading ? '⏳ Importing All Data...' : '🚀 Import Fishbowl Data'}
+                </button>
+              </div>
+
+              {fishbowlResult && (
+                <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-green-900 mb-3">
+                    ✅ Import Complete!
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <p className="text-gray-600">Customers</p>
+                      <p className="text-xl font-bold text-blue-600">
+                        {(fishbowlResult.stats.customersCreated + fishbowlResult.stats.customersUpdated).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {fishbowlResult.stats.customersCreated} new, {fishbowlResult.stats.customersUpdated} updated
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Sales Orders</p>
+                      <p className="text-xl font-bold text-green-600">
+                        {(fishbowlResult.stats.ordersCreated + fishbowlResult.stats.ordersUpdated).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {fishbowlResult.stats.ordersCreated} new, {fishbowlResult.stats.ordersUpdated} updated
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Line Items</p>
+                      <p className="text-xl font-bold text-purple-600">
+                        {fishbowlResult.stats.itemsCreated.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-gray-500">Product-level data</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Calculate Commissions Section */}
+            <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">💰 Calculate Monthly Commissions</h3>
+                  <p className="text-sm text-gray-600">
+                    Process imported orders and calculate commissions
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowMonthYearModal(true)}
+                  disabled={saving}
+                  className="btn btn-success flex items-center"
+                >
+                  <Calculator className="w-4 h-4 mr-2" />
+                  {saving ? 'Calculating...' : 'Calculate'}
+                </button>
               </div>
             </div>
 
