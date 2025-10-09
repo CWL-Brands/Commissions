@@ -731,11 +731,17 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       for (const rep of reps) {
-        if (rep.id.startsWith('new_')) {
-          const { id, ...data } = rep;
+        const { id, ...data } = rep;
+        
+        // Auto-set salesPerson field from fishbowlUsername for commission calculations
+        // This ensures the rep can be found when processing Fishbowl orders
+        if (data.fishbowlUsername) {
+          data.salesPerson = data.fishbowlUsername;
+        }
+        
+        if (id.startsWith('new_')) {
           await addDoc(collection(db, 'reps'), data);
         } else {
-          const { id, ...data } = rep;
           await updateDoc(doc(db, 'reps', id), data);
         }
       }

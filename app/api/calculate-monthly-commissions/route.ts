@@ -63,13 +63,29 @@ export async function POST(request: NextRequest) {
     });
     console.log(`Loaded ${customersMap.size} customers with account types`);
 
-    // Get all reps
+    // Get all reps - map by BOTH salesPerson (long name from Fishbowl) AND fishbowlUsername
     const repsSnapshot = await adminDb.collection('reps').get();
     const repsMap = new Map();
     repsSnapshot.forEach(doc => {
       const data = doc.data();
+      const repData = { id: doc.id, ...data };
+      
+      // Map by salesPerson if it exists (long name like "Jared", "BenW", "DerekW")
       if (data.salesPerson) {
-        repsMap.set(data.salesPerson, { id: doc.id, ...data });
+        repsMap.set(data.salesPerson, repData);
+      }
+      
+      // Also map by fishbowlUsername for backwards compatibility
+      if (data.fishbowlUsername) {
+        repsMap.set(data.fishbowlUsername, repData);
+      }
+      
+      // Also map by name (first name only) to catch cases like "Jared" -> "Jared"
+      if (data.name) {
+        const firstName = data.name.split(' ')[0];
+        if (!repsMap.has(firstName)) {
+          repsMap.set(firstName, repData);
+        }
       }
     });
 
