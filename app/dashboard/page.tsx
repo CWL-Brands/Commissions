@@ -11,10 +11,10 @@ import {
   Database, 
   FileText, 
   TrendingUp,
+  LogOut,
   DollarSign,
-  Target,
   Award,
-  LogOut
+  Target
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -231,12 +231,27 @@ export default function DashboardPage() {
           >
             <div className="flex items-center mb-4">
               <FileText className="w-8 h-8 text-primary-600 mr-3" />
-              <h3 className="text-lg font-semibold text-gray-900">Reports</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Quarterly Reports</h3>
             </div>
             <p className="text-sm text-gray-600">
-              Generate quarterly summaries and export data
+              Generate quarterly bonus summaries and export data
             </p>
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={() => router.push('/monthly-reports')}
+              className="card hover:shadow-lg transition-shadow cursor-pointer text-left"
+            >
+              <div className="flex items-center mb-4">
+                <DollarSign className="w-8 h-8 text-green-600 mr-3" />
+                <h3 className="text-lg font-semibold text-gray-900">Monthly Commissions</h3>
+              </div>
+              <p className="text-sm text-gray-600">
+                View monthly commission reports and details
+              </p>
+            </button>
+          )}
 
           {isAdmin && (
             <button

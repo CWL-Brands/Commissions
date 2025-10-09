@@ -65,6 +65,18 @@ service cloud.firestore {
       allow write: if true;
     }
     
+    // Monthly commissions (internal app - permissive)
+    match /monthly_commissions/{commissionId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Monthly commission summaries (internal app - permissive)
+    match /monthly_commission_summary/{summaryId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
     // ========== EXISTING RULES (FROM YOUR CONSOLE) ==========
     
     // Products collection - public read, admin write
