@@ -2673,13 +2673,26 @@ export default function SettingsPage() {
                           )}
                         </div>
                       </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <div 
+                          className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
+                          onClick={() => handleSort('shippingState')}
+                        >
+                          <span>State</span>
+                          {sortField === 'shippingState' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredCustomers.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                           No customers found
                         </td>
                       </tr>
@@ -2770,6 +2783,7 @@ export default function SettingsPage() {
                             })()}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-600">{customer.shippingCity || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{customer.shippingState || '-'}</td>
                           <td className="px-4 py-3">
                             {customer.accountType === 'Retail' ? (
                               <span className="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">

@@ -95,11 +95,16 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         
         const customerRef = adminDb.collection('fishbowl_customers').doc(customerDocId);
         
+        // Check if exists first to preserve account type
+        const existingCustomer = await customerRef.get();
+        const existingData = existingCustomer.exists ? existingCustomer.data() : null;
+        
         const customerData: any = {
           id: customerDocId,  // Fishbowl Customer ID
           name: row['Customer'] || '',  // Customer Name
           accountNumber: row['Account Number'] || '',  // Customer Account Number in Fishbowl
-          accountType: row['Account Type'] || '',
+          // PRESERVE existing accountType if it exists, otherwise use Fishbowl value
+          accountType: existingData?.accountType || row['Account Type'] || '',
           companyId: row['Company id'] || '',
           companyName: row['Company name'] || '',
           parentCompanyId: row['Parent Company ID'] || '',
@@ -115,8 +120,6 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           source: 'fishbowl_unified',
         };
         
-        // Check if exists
-        const existingCustomer = await customerRef.get();
         if (existingCustomer.exists) {
           batch.update(customerRef, customerData);
           stats.customersUpdated++;
