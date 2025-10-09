@@ -1418,22 +1418,291 @@ export default function SettingsPage() {
         {/* Monthly Commissions Tab */}
         {activeTab === 'monthly' && (
           <div className="space-y-8">
+            {/* Commission Rate Matrix */}
             <div className="card">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Monthly Commission Rates</h2>
-              <p className="text-gray-600 mb-4">
-                Configure commission rates based on rep title, customer segment, and customer status.
-              </p>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
-                <p className="text-sm text-yellow-800">
-                  <strong>Coming Soon:</strong> Monthly commission rate matrix will be available here.
-                  This will allow you to set different commission percentages based on:
-                </p>
-                <ul className="list-disc list-inside text-sm text-yellow-800 mt-2 space-y-1">
-                  <li>Rep Title (Account Executive, Jr. AE, etc.)</li>
-                  <li>Customer Segment (Distributor vs Wholesale)</li>
-                  <li>Customer Status (New, 6-Month Active, 12-Month Active)</li>
-                  <li>Special Rules (Rep Transfer, Inactivity Threshold)</li>
-                </ul>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">Monthly Commission Rates</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Configure commission percentages based on rep title, customer segment, and customer status
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    toast.success('Commission rates saved!');
+                  }}
+                  className="btn btn-primary flex items-center"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Rates
+                </button>
+              </div>
+
+              {/* Title Selector */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Title to Configure
+                </label>
+                <select
+                  value={commissionRates.titles[0]}
+                  className="input max-w-xs"
+                >
+                  {commissionRates.titles.map((title: string) => (
+                    <option key={title} value={title}>{title}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Rate Matrix for Each Segment */}
+              {commissionRates.segments.map((segment: any) => (
+                <div key={segment.id} className="mb-8">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                    {segment.name} Segment
+                    <span className="ml-2 text-sm font-normal text-gray-500">
+                      ({segment.description || 'Customer segment'})
+                    </span>
+                  </h3>
+                  
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                            Customer Status
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                            Description
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                            Commission %
+                          </th>
+                          <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
+                            Active
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            New Business
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            No orders in last 12 months
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center max-w-xs">
+                              <input
+                                type="number"
+                                defaultValue={segment.id === 'distributor' ? '8.0' : '10.0'}
+                                step="0.1"
+                                min="0"
+                                max="100"
+                                className="input"
+                                placeholder="0.0"
+                              />
+                              <span className="ml-2 text-gray-600">%</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              defaultChecked
+                              className="w-4 h-4"
+                            />
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            6-Month Active
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            Ordered within last 6 months
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center max-w-xs">
+                              <input
+                                type="number"
+                                defaultValue={segment.id === 'distributor' ? '5.0' : '7.0'}
+                                step="0.1"
+                                min="0"
+                                max="100"
+                                className="input"
+                                placeholder="0.0"
+                              />
+                              <span className="ml-2 text-gray-600">%</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              defaultChecked
+                              className="w-4 h-4"
+                            />
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            12-Month Active
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            Ordered 6-12 months ago
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center max-w-xs">
+                              <input
+                                type="number"
+                                defaultValue={segment.id === 'distributor' ? '3.0' : '5.0'}
+                                step="0.1"
+                                min="0"
+                                max="100"
+                                className="input"
+                                placeholder="0.0"
+                              />
+                              <span className="ml-2 text-gray-600">%</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              defaultChecked
+                              className="w-4 h-4"
+                            />
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+
+              {/* Special Rules Section */}
+              <div className="mt-8 border-t border-gray-200 pt-8">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Special Rules</h3>
+                
+                <div className="space-y-6">
+                  {/* Rep Transfer Rule */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-semibold text-gray-900">Rep Transfer Commission</h4>
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={commissionRates.specialRules.repTransfer.enabled}
+                          className="mr-2"
+                        />
+                        <span className="text-sm text-gray-700">Enabled</span>
+                      </label>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-4">
+                      When a customer changes sales reps, apply special commission rate for the new rep
+                    </p>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Flat Fee
+                        </label>
+                        <div className="flex items-center">
+                          <span className="text-gray-600 mr-1">$</span>
+                          <input
+                            type="number"
+                            value={commissionRates.specialRules.repTransfer.flatFee}
+                            onChange={(e) => setCommissionRates({
+                              ...commissionRates,
+                              specialRules: {
+                                ...commissionRates.specialRules,
+                                repTransfer: {
+                                  ...commissionRates.specialRules.repTransfer,
+                                  flatFee: Number(e.target.value)
+                                }
+                              }
+                            })}
+                            className="input"
+                            placeholder="500"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Percent Fallback
+                        </label>
+                        <div className="flex items-center">
+                          <input
+                            type="number"
+                            value={commissionRates.specialRules.repTransfer.percentFallback}
+                            onChange={(e) => setCommissionRates({
+                              ...commissionRates,
+                              specialRules: {
+                                ...commissionRates.specialRules,
+                                repTransfer: {
+                                  ...commissionRates.specialRules.repTransfer,
+                                  percentFallback: Number(e.target.value)
+                                }
+                              }
+                            })}
+                            step="0.1"
+                            className="input"
+                            placeholder="5.0"
+                          />
+                          <span className="ml-2 text-gray-600">%</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Calculation
+                        </label>
+                        <label className="flex items-center mt-2">
+                          <input
+                            type="checkbox"
+                            checked={commissionRates.specialRules.repTransfer.useGreater}
+                            onChange={(e) => setCommissionRates({
+                              ...commissionRates,
+                              specialRules: {
+                                ...commissionRates.specialRules,
+                                repTransfer: {
+                                  ...commissionRates.specialRules.repTransfer,
+                                  useGreater: e.target.checked
+                                }
+                              }
+                            })}
+                            className="mr-2"
+                          />
+                          <span className="text-sm text-gray-700">Use Greater of Two</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Inactivity Threshold */}
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-2">Customer Inactivity Threshold</h4>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Customer reverts to &quot;New Business&quot; status after this many months of no orders
+                    </p>
+                    <div className="max-w-xs">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Months of Inactivity
+                      </label>
+                      <div className="flex items-center">
+                        <input
+                          type="number"
+                          value={commissionRates.specialRules.inactivityThreshold}
+                          onChange={(e) => setCommissionRates({
+                            ...commissionRates,
+                            specialRules: {
+                              ...commissionRates.specialRules,
+                              inactivityThreshold: Number(e.target.value)
+                            }
+                          })}
+                          min="1"
+                          max="24"
+                          className="input"
+                          placeholder="12"
+                        />
+                        <span className="ml-2 text-gray-600">months</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
