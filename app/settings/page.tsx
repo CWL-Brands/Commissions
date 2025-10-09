@@ -30,7 +30,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q4 2025');
   const [quarters, setQuarters] = useState<string[]>(['Q4 2025', 'Q1 2026']);
-  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'team'>('quarterly');
+  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'team' | 'orgchart'>('quarterly');
 
   // Configuration state
   const [config, setConfig] = useState<CommissionConfig>({
@@ -88,6 +88,10 @@ export default function SettingsPage() {
     excludeShipping: true,
     useOrderValue: true,
   });
+
+  // Org Chart state
+  const [orgUsers, setOrgUsers] = useState<any[]>([]);
+  const [selectedOrgLevel, setSelectedOrgLevel] = useState<'all' | 'vp' | 'director' | 'regional' | 'division' | 'territory' | 'rep'>('all');
 
   const loadQuarters = async () => {
     try {
@@ -784,6 +788,16 @@ export default function SettingsPage() {
               }`}
             >
               Sales Team
+            </button>
+            <button
+              onClick={() => setActiveTab('orgchart')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'orgchart'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Org Chart
             </button>
           </nav>
         </div>
@@ -2014,6 +2028,58 @@ export default function SettingsPage() {
                 <span className="text-lg font-bold text-primary-600">
                   {reps.filter(r => r.active).length}
                 </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Org Chart Tab */}
+        {activeTab === 'orgchart' && (
+          <div className="space-y-8">
+            <div className="card">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                🏢 Organizational Structure
+              </h2>
+              <p className="text-sm text-gray-600 mb-6">
+                Manage your sales organization hierarchy: VP Sales → Directors → Regional Managers → Division Managers → Territory Managers → Sales Reps
+              </p>
+
+              {/* Coming Soon Placeholder */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-8 text-center">
+                <div className="text-6xl mb-4">🚀</div>
+                <h3 className="text-2xl font-bold text-gray-900 mb-2">Org Chart Builder</h3>
+                <p className="text-gray-600 mb-4">
+                  Full organizational hierarchy management coming next!
+                </p>
+                <div className="grid md:grid-cols-3 gap-4 mt-6 text-left">
+                  <div className="bg-white p-4 rounded-lg shadow-sm">
+                    <div className="font-semibold text-gray-900 mb-2">✅ Phase 1 Complete</div>
+                    <ul className="text-sm text-gray-600 space-y-1">
+                      <li>• Customer Management</li>
+                      <li>• Account Type Editing</li>
+                      <li>• Sales Rep Assignment</li>
+                      <li>• Shipping City Display</li>
+                    </ul>
+                  </div>
+                  <div className="bg-white p-4 rounded-lg shadow-sm">
+                    <div className="font-semibold text-gray-900 mb-2">🔨 Phase 2 In Progress</div>
+                    <ul className="text-sm text-gray-600 space-y-1">
+                      <li>• Unified Users Collection</li>
+                      <li>• Org Hierarchy Levels</li>
+                      <li>• Territory Mapping</li>
+                      <li>• State Assignments</li>
+                    </ul>
+                  </div>
+                  <div className="bg-white p-4 rounded-lg shadow-sm">
+                    <div className="font-semibold text-gray-900 mb-2">📋 Phase 3 Next</div>
+                    <ul className="text-sm text-gray-600 space-y-1">
+                      <li>• Add/Edit Org Levels</li>
+                      <li>• Auto-assign by State</li>
+                      <li>• Reporting Structure</li>
+                      <li>• Commission Routing</li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

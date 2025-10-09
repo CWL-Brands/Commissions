@@ -27,7 +27,10 @@ import {
   Upload,
   Calendar,
   Calculator,
-  Users
+  Users,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionEntry, CommissionConfig, ProductSubGoal, ActivitySubGoal } from '@/types';
@@ -57,6 +60,10 @@ export default function DatabasePage() {
   const [selectedRep, setSelectedRep] = useState('all');
   const [selectedAccountType, setSelectedAccountType] = useState('all');
   const [savingCustomer, setSavingCustomer] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'shippingCity' | 'shippingState'>('customerName');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [selectedCity, setSelectedCity] = useState('all');
+  const [selectedState, setSelectedState] = useState('all');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -229,6 +236,8 @@ export default function DatabasePage() {
           accountType: data.accountType || 'Retail',
           salesPerson: repName, // Use mapped rep name
           fishbowlUsername: fishbowlUsername, // Keep original for filtering
+          shippingCity: data.shippingCity || '',
+          shippingState: data.shippingState || '', // Will be populated when new data uploads
           lastOrderDate: data.lastOrderDate || data.updatedAt,
           totalOrders: data.totalOrders || 0,
           accountNumber: data.accountNumber,
@@ -269,12 +278,46 @@ export default function DatabasePage() {
     }
   };
 
+  const updateSalesRep = async (customerId: string, newFishbowlUsername: string) => {
+    setSavingCustomer(customerId);
+    try {
+      const customerRef = doc(db, 'fishbowl_customers', customerId);
+      await updateDoc(customerRef, {
+        salesPerson: newFishbowlUsername
+      });
+
+      // Get the rep name for display
+      const rep = reps.find(r => r.salesPerson === newFishbowlUsername);
+      const repName = rep?.name || newFishbowlUsername;
+
+      setCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, salesPerson: repName, fishbowlUsername: newFishbowlUsername } : c
+      ));
+
+      toast.success(`Sales rep updated to ${repName}`);
+    } catch (error) {
+      console.error('Error updating sales rep:', error);
+      toast.error('Failed to update sales rep');
+    } finally {
+      setSavingCustomer(null);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'customers' && isAdmin) {
       loadCustomers();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, isAdmin]);
+
+  const handleSort = (field: 'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'shippingCity' | 'shippingState') => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
 
   useEffect(() => {
     if (activeTab !== 'customers') return;
@@ -296,8 +339,37 @@ export default function DatabasePage() {
       filtered = filtered.filter(c => c.accountType === selectedAccountType);
     }
 
+    if (selectedCity !== 'all') {
+      filtered = filtered.filter(c => c.shippingCity === selectedCity);
+    }
+
+    if (selectedState !== 'all') {
+      filtered = filtered.filter(c => c.shippingState === selectedState);
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      let aVal = a[sortField];
+      let bVal = b[sortField];
+      
+      // Handle undefined/null values
+      if (!aVal) aVal = '';
+      if (!bVal) bVal = '';
+      
+      // String comparison
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        const comparison = aVal.localeCompare(bVal);
+        return sortDirection === 'asc' ? comparison : -comparison;
+      }
+      
+      // Number comparison
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
     setFilteredCustomers(filtered);
-  }, [searchTerm, selectedRep, selectedAccountType, customers, activeTab]);
+  }, [searchTerm, selectedRep, selectedAccountType, selectedCity, selectedState, customers, activeTab, sortField, sortDirection]);
 
   const createNewEntry = async () => {
     if (!user || !config) return;
@@ -1003,7 +1075,7 @@ export default function DatabasePage() {
 
             {/* Filters */}
             <div className="card mb-8">
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Search Customer
@@ -1048,6 +1120,22 @@ export default function DatabasePage() {
                     <option value="Distributor">Distributor</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Shipping City
+                  </label>
+                  <select
+                    value={selectedCity}
+                    onChange={(e) => setSelectedCity(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="all">All Cities</option>
+                    {Array.from(new Set(customers.map(c => c.shippingCity).filter(Boolean))).sort().map(city => (
+                      <option key={city} value={city}>{city}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1061,17 +1149,78 @@ export default function DatabasePage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Customer #</th>
-                      <th>Customer Name</th>
-                      <th>Account Type</th>
-                      <th>Sales Rep</th>
+                      <th 
+                        className="cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleSort('customerNum')}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>Customer #</span>
+                          {sortField === 'customerNum' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleSort('customerName')}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>Customer Name</span>
+                          {sortField === 'customerName' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleSort('accountType')}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>Account Type</span>
+                          {sortField === 'accountType' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleSort('salesPerson')}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>Sales Rep</span>
+                          {sortField === 'salesPerson' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th 
+                        className="cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleSort('shippingCity')}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>City</span>
+                          {sortField === 'shippingCity' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredCustomers.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="text-center text-gray-500 py-8">
+                        <td colSpan={6} className="text-center text-gray-500 py-8">
                           No customers found
                         </td>
                       </tr>
@@ -1104,7 +1253,27 @@ export default function DatabasePage() {
                               </select>
                             )}
                           </td>
-                          <td className="text-sm text-gray-600">{customer.salesPerson || '-'}</td>
+                          <td>
+                            {savingCustomer === customer.id ? (
+                              <div className="flex items-center space-x-2">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
+                              </div>
+                            ) : (
+                              <select
+                                value={customer.fishbowlUsername || ''}
+                                onChange={(e) => updateSalesRep(customer.id, e.target.value)}
+                                className="input text-sm"
+                              >
+                                <option value="">Unassigned</option>
+                                {reps.filter(r => r.active).map(rep => (
+                                  <option key={rep.id} value={rep.salesPerson}>
+                                    {rep.name} ({rep.salesPerson})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                          <td className="text-sm text-gray-600">{customer.shippingCity || '-'}</td>
                           <td>
                             {customer.accountType === 'Retail' ? (
                               <span className="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">
