@@ -15,7 +15,8 @@ import {
   ArrowLeft,
   UserPlus,
   Download,
-  Calendar
+  Calendar,
+  Calculator
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole } from '@/types';
@@ -1288,6 +1289,57 @@ export default function SettingsPage() {
         {/* Monthly Commissions Tab */}
         {activeTab === 'monthly' && (
           <div className="space-y-8">
+            {/* Calculate Monthly Commissions */}
+            <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Calculate Monthly Commissions</h3>
+                  <p className="text-sm text-gray-600">
+                    Process Fishbowl sales orders and calculate commissions based on configured rates
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const month = prompt('Enter month (01-12):', new Date().getMonth().toString().padStart(2, '0'));
+                    const year = prompt('Enter year:', new Date().getFullYear().toString());
+                    
+                    if (!month || !year) return;
+                    
+                    setSaving(true);
+                    const loadingToast = toast.loading('Calculating monthly commissions...');
+                    
+                    try {
+                      const response = await fetch('/api/calculate-monthly-commissions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ month, year })
+                      });
+                      
+                      const data = await response.json();
+                      
+                      if (!response.ok) {
+                        throw new Error(data.error || 'Calculation failed');
+                      }
+                      
+                      toast.success(
+                        `✅ Calculated ${data.commissionsCalculated} commissions! Total: $${data.totalCommission.toFixed(2)}`,
+                        { id: loadingToast, duration: 5000 }
+                      );
+                    } catch (error: any) {
+                      toast.error(error.message || 'Failed to calculate commissions', { id: loadingToast });
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  disabled={saving}
+                  className="btn btn-success flex items-center"
+                >
+                  <Calculator className="w-4 h-4 mr-2" />
+                  {saving ? 'Calculating...' : 'Calculate Commissions'}
+                </button>
+              </div>
+            </div>
+
             {/* Commission Rate Matrix */}
             <div className="card">
               <div className="flex items-center justify-between mb-6">
