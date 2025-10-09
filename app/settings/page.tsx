@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole, CommissionEntry } from '@/types';
-import { validateWeightsSum, calculatePayout } from '@/lib/commission/calculator';
+import { validateWeightsSum, calculatePayout, formatCurrency, formatAttainment } from '@/lib/commission/calculator';
 import MonthYearModal from '@/components/MonthYearModal';
 
 export default function SettingsPage() {
@@ -32,7 +32,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q4 2025');
   const [quarters, setQuarters] = useState<string[]>(['Q4 2025', 'Q1 2026']);
-  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'team' | 'orgchart' | 'database'>('quarterly');
+  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'customers' | 'team' | 'orgchart' | 'database'>('quarterly');
 
   // Configuration state
   const [config, setConfig] = useState<CommissionConfig>({
@@ -99,9 +99,23 @@ export default function SettingsPage() {
 
   // Database state
   const [entries, setEntries] = useState<CommissionEntry[]>([]);
+  const [monthlyCommissions, setMonthlyCommissions] = useState<any[]>([]);
+  const [databaseSubTab, setDatabaseSubTab] = useState<'quarterly' | 'monthly'>('quarterly');
   const [filterRep, setFilterRep] = useState('all');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [calculating, setCalculating] = useState(false);
+
+  // Customer Management state
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [filteredCustomers, setFilteredCustomers] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedRep, setSelectedRep] = useState('all');
+  const [selectedAccountType, setSelectedAccountType] = useState('all');
+  const [savingCustomer, setSavingCustomer] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'shippingCity' | 'shippingState'>('customerName');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [selectedCity, setSelectedCity] = useState('all');
+  const [selectedState, setSelectedState] = useState('all');
 
   const loadQuarters = async () => {
     try {
@@ -265,8 +279,9 @@ export default function SettingsPage() {
     }
     if (activeTab === 'database' && user) {
       loadEntries(user.uid);
+      loadMonthlyCommissions(user.uid);
     }
-  }, [activeTab, user]);
+  }, [activeTab, user, filterRep]);
 
   // Load commission rates when title changes
   useEffect(() => {
@@ -768,6 +783,32 @@ export default function SettingsPage() {
     }
   };
 
+  const loadMonthlyCommissions = async (userId: string) => {
+    try {
+      let q = query(
+        collection(db, 'monthly_commissions'),
+        orderBy('commissionMonth', 'desc')
+      );
+
+      if (!isAdmin && filterRep === 'all') {
+        q = query(q, where('repId', '==', userId));
+      } else if (filterRep !== 'all') {
+        q = query(q, where('repId', '==', filterRep));
+      }
+
+      const snapshot = await getDocs(q);
+      const commissionsData: any[] = [];
+      snapshot.forEach((doc) => {
+        commissionsData.push({ id: doc.id, ...doc.data() });
+      });
+      setMonthlyCommissions(commissionsData);
+      console.log(`Loaded ${commissionsData.length} monthly commissions`);
+    } catch (error) {
+      console.error('Error loading monthly commissions:', error);
+      toast.error('Failed to load monthly commissions');
+    }
+  };
+
   const handleBulkUpload = async (csvText: string) => {
     if (!isAdmin || !config || !user) {
       toast.error('Admin access required');
@@ -945,6 +986,16 @@ export default function SettingsPage() {
               }`}
             >
               Monthly Commissions
+            </button>
+            <button
+              onClick={() => setActiveTab('customers')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'customers'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Customers
             </button>
             <button
               onClick={() => setActiveTab('team')}
@@ -2378,10 +2429,10 @@ export default function SettingsPage() {
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900">📊 Commission Database</h2>
                   <p className="text-sm text-gray-600 mt-1">
-                    View and manage quarterly commission entries
+                    View quarterly bonuses and monthly commissions
                   </p>
                 </div>
-                {isAdmin && (
+                {isAdmin && databaseSubTab === 'quarterly' && (
                   <button
                     onClick={() => setShowUploadModal(true)}
                     className="btn btn-primary flex items-center"
@@ -2390,6 +2441,30 @@ export default function SettingsPage() {
                     Bulk Upload
                   </button>
                 )}
+              </div>
+
+              {/* Sub-tabs */}
+              <div className="flex space-x-4 border-b border-gray-200 mb-6">
+                <button
+                  onClick={() => setDatabaseSubTab('quarterly')}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                    databaseSubTab === 'quarterly'
+                      ? 'border-primary-500 text-primary-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Quarterly Bonuses
+                </button>
+                <button
+                  onClick={() => setDatabaseSubTab('monthly')}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                    databaseSubTab === 'monthly'
+                      ? 'border-primary-500 text-primary-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Monthly Commissions
+                </button>
               </div>
 
               {/* Filters */}
@@ -2431,7 +2506,8 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Commission Entries Table */}
+            {/* Quarterly Bonuses Table */}
+            {databaseSubTab === 'quarterly' && (
             <div className="card">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Commission Entries ({entries.length})
@@ -2493,6 +2569,69 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+            )}
+
+            {/* Monthly Commissions Table */}
+            {databaseSubTab === 'monthly' && (
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Monthly Commissions ({monthlyCommissions.length})
+              </h3>
+
+              {monthlyCommissions.length === 0 ? (
+                <div className="text-center py-12">
+                  <DatabaseIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 mb-2">No monthly commissions found</p>
+                  <p className="text-sm text-gray-400">
+                    Calculate monthly commissions from the Monthly Commissions tab
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Month</th>
+                        <th>Rep</th>
+                        <th>Customer</th>
+                        <th>Order #</th>
+                        <th>Account Type</th>
+                        <th>Segment</th>
+                        <th>Status</th>
+                        <th>Order Value</th>
+                        <th>Commission</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monthlyCommissions.map((comm) => (
+                        <tr key={comm.id}>
+                          <td className="font-medium">{comm.commissionMonth}</td>
+                          <td>{comm.repName}</td>
+                          <td className="text-sm">{comm.customerName}</td>
+                          <td className="text-sm">{comm.orderNum}</td>
+                          <td>
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              comm.accountType === 'Distributor' ? 'bg-green-100 text-green-800' :
+                              comm.accountType === 'Wholesale' ? 'bg-blue-100 text-blue-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {comm.accountType}
+                            </span>
+                          </td>
+                          <td className="text-sm">{comm.customerSegment}</td>
+                          <td className="text-sm">{comm.customerStatus}</td>
+                          <td className="text-right">{formatCurrency(comm.orderValue)}</td>
+                          <td className="text-right font-semibold text-green-600">
+                            {formatCurrency(comm.commissionAmount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            )}
           </div>
         )}
       </div>
