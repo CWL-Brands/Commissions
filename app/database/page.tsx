@@ -26,7 +26,8 @@ import {
   Trash2,
   Upload,
   Calendar,
-  Calculator
+  Calculator,
+  Users
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionEntry, CommissionConfig, ProductSubGoal, ActivitySubGoal } from '@/types';
@@ -37,6 +38,7 @@ export default function DatabasePage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [activeTab, setActiveTab] = useState<'bonus' | 'customers'>('bonus');
   const [entries, setEntries] = useState<CommissionEntry[]>([]);
   const [config, setConfig] = useState<CommissionConfig | null>(null);
   const [products, setProducts] = useState<ProductSubGoal[]>([]);
@@ -47,6 +49,14 @@ export default function DatabasePage() {
   const [filterRep, setFilterRep] = useState('all');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [calculating, setCalculating] = useState(false);
+  
+  // Customer Management State
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [filteredCustomers, setFilteredCustomers] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedRep, setSelectedRep] = useState('all');
+  const [selectedAccountType, setSelectedAccountType] = useState('all');
+  const [savingCustomer, setSavingCustomer] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -174,6 +184,85 @@ export default function DatabasePage() {
       toast.error('Failed to load entries');
     }
   };
+
+  const loadCustomers = async () => {
+    try {
+      const customersQuery = query(
+        collection(db, 'fishbowl_customers'),
+        orderBy('customerName', 'asc')
+      );
+      
+      const snapshot = await getDocs(customersQuery);
+      const customersData: any[] = [];
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        customersData.push({
+          id: doc.id,
+          customerNum: data.customerNum || data.customerNumber || '',
+          customerName: data.customerName || data.name || '',
+          accountType: data.accountType || 'Retail',
+          salesPerson: data.salesPerson || '',
+          lastOrderDate: data.lastOrderDate,
+          totalOrders: data.totalOrders || 0,
+        });
+      });
+      
+      setCustomers(customersData);
+      setFilteredCustomers(customersData);
+    } catch (error) {
+      console.error('Error loading customers:', error);
+      toast.error('Failed to load customers');
+    }
+  };
+
+  const updateAccountType = async (customerId: string, newAccountType: string) => {
+    setSavingCustomer(customerId);
+    try {
+      const customerRef = doc(db, 'fishbowl_customers', customerId);
+      await updateDoc(customerRef, {
+        accountType: newAccountType
+      });
+
+      setCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, accountType: newAccountType } : c
+      ));
+
+      toast.success(`Account type updated to ${newAccountType}`);
+    } catch (error) {
+      console.error('Error updating account type:', error);
+      toast.error('Failed to update account type');
+    } finally {
+      setSavingCustomer(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'customers') {
+      loadCustomers();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    let filtered = customers;
+
+    if (searchTerm) {
+      filtered = filtered.filter(c => 
+        c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.customerNum.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    if (selectedRep !== 'all') {
+      filtered = filtered.filter(c => c.salesPerson === selectedRep);
+    }
+
+    if (selectedAccountType !== 'all') {
+      filtered = filtered.filter(c => c.accountType === selectedAccountType);
+    }
+
+    setFilteredCustomers(filtered);
+  }, [searchTerm, selectedRep, selectedAccountType, customers]);
 
   const createNewEntry = async () => {
     if (!user || !config) return;
@@ -539,7 +628,7 @@ export default function DatabasePage() {
       {/* Header */}
       <header className="bg-white border-b border-gray-200">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
               <button
                 onClick={() => router.push('/dashboard')}
@@ -549,18 +638,52 @@ export default function DatabasePage() {
               </button>
               <DatabaseIcon className="w-8 h-8 text-primary-600 mr-3" />
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Bonus Database</h1>
-                <p className="text-sm text-gray-600">View and manage quarterly bonus data</p>
+                <h1 className="text-xl font-bold text-gray-900">Database</h1>
+                <p className="text-sm text-gray-600">Manage bonuses and customers</p>
               </div>
             </div>
-            <div className="flex items-center space-x-3">
+          </div>
+
+          {/* Tabs */}
+          <div className="flex space-x-8 border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('bonus')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'bonus'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <DatabaseIcon className="w-4 h-4 inline mr-2" />
+              Quarterly Bonuses
+            </button>
+            <button
+              onClick={() => setActiveTab('customers')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'customers'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <Users className="w-4 h-4 inline mr-2" />
+              Customer Management
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        {/* BONUS TAB */}
+        {activeTab === 'bonus' && (
+          <>
+            {/* Action Buttons */}
+            <div className="flex items-center space-x-3 mb-6">
               {isAdmin && (
                 <>
                   <button
                     onClick={calculateCommissions}
                     disabled={calculating || !selectedQuarter}
                     className="btn btn-primary flex items-center"
-                    title="Calculate bonuses from Fishbowl data"
                   >
                     {calculating ? (
                       <>
@@ -598,13 +721,9 @@ export default function DatabasePage() {
                 New Entry
               </button>
             </div>
-          </div>
-        </div>
-      </header>
 
-      <div className="container mx-auto px-4 py-8">
-        {/* Filters */}
-        <div className="card mb-6">
+            {/* Filters */}
+            <div className="card mb-6">
           <div className="flex items-center space-x-4">
             <Filter className="w-5 h-5 text-gray-600" />
             <div>
@@ -798,6 +917,178 @@ export default function DatabasePage() {
               </div>
             </div>
           </div>
+        )}
+          </>
+        )}
+
+        {/* CUSTOMER MANAGEMENT TAB */}
+        {activeTab === 'customers' && (
+          <>
+            {/* Stats Cards */}
+            <div className="grid md:grid-cols-4 gap-6 mb-8">
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Total Customers</h3>
+                  <Users className="w-5 h-5 text-blue-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">{customers.length}</p>
+              </div>
+
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Retail</h3>
+                  <Filter className="w-5 h-5 text-yellow-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">
+                  {customers.filter(c => c.accountType === 'Retail').length}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">No commission</p>
+              </div>
+
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Wholesale</h3>
+                  <Users className="w-5 h-5 text-green-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">
+                  {customers.filter(c => c.accountType === 'Wholesale').length}
+                </p>
+              </div>
+
+              <div className="card">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-600">Distributor</h3>
+                  <Users className="w-5 h-5 text-green-600" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">
+                  {customers.filter(c => c.accountType === 'Distributor').length}
+                </p>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="card mb-8">
+              <div className="grid md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Search Customer
+                  </label>
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search by name or number..."
+                    className="input w-full"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Sales Representative
+                  </label>
+                  <select
+                    value={selectedRep}
+                    onChange={(e) => setSelectedRep(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="all">All Reps</option>
+                    {Array.from(new Set(customers.map(c => c.salesPerson).filter(Boolean))).sort().map(rep => (
+                      <option key={rep} value={rep}>{rep}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Account Type
+                  </label>
+                  <select
+                    value={selectedAccountType}
+                    onChange={(e) => setSelectedAccountType(e.target.value)}
+                    className="input w-full"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="Retail">Retail</option>
+                    <option value="Wholesale">Wholesale</option>
+                    <option value="Distributor">Distributor</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Customer Table */}
+            <div className="card">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                Customers ({filteredCustomers.length})
+              </h2>
+
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Customer #</th>
+                      <th>Customer Name</th>
+                      <th>Account Type</th>
+                      <th>Sales Rep</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredCustomers.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="text-center text-gray-500 py-8">
+                          No customers found
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCustomers.map((customer) => (
+                        <tr key={customer.id}>
+                          <td className="text-sm font-medium">{customer.customerNum}</td>
+                          <td className="text-sm">{customer.customerName}</td>
+                          <td>
+                            {savingCustomer === customer.id ? (
+                              <div className="flex items-center space-x-2">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
+                                <span className="text-sm text-gray-600">Saving...</span>
+                              </div>
+                            ) : (
+                              <select
+                                value={customer.accountType}
+                                onChange={(e) => updateAccountType(customer.id, e.target.value)}
+                                className={`input text-sm ${
+                                  customer.accountType === 'Retail' 
+                                    ? 'bg-yellow-50 border-yellow-300' 
+                                    : customer.accountType === 'Wholesale'
+                                    ? 'bg-blue-50 border-blue-300'
+                                    : 'bg-green-50 border-green-300'
+                                }`}
+                              >
+                                <option value="Retail">Retail</option>
+                                <option value="Wholesale">Wholesale</option>
+                                <option value="Distributor">Distributor</option>
+                              </select>
+                            )}
+                          </td>
+                          <td className="text-sm text-gray-600">{customer.salesPerson || '-'}</td>
+                          <td>
+                            {customer.accountType === 'Retail' ? (
+                              <span className="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">
+                                ⚠ No Commission
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                                ✓ Active
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Bulk Upload Modal */}
