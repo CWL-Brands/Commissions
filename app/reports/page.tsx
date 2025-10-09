@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Fragment as React } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -895,7 +895,7 @@ export default function ReportsPage() {
                                   </thead>
                                   <tbody>
                                   {customer.orders.map((order) => (
-  <React.Fragment key={order.id}>
+  <Fragment key={order.id}>
     <tr 
       className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer"
       onClick={() => toggleOrder(order.orderNum, order.commissionRate)}
@@ -955,7 +955,7 @@ export default function ReportsPage() {
         </td>
       </tr>
     )}
-  </React.Fragment>
+  </Fragment>
 ))}
                                   </tbody>
                                 </table>

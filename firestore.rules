@@ -77,6 +77,22 @@ service cloud.firestore {
       allow write: if true;
     }
     
+    // Fishbowl data collections (read-only for app, written by sync)
+    match /fishbowl_soitems/{itemId} {
+      allow read: if true;
+      allow write: if true; // Allow sync processes to write
+    }
+    
+    match /fishbowl_sales_orders/{orderId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    match /fishbowl_customers/{customerId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
     // ========== EXISTING RULES (FROM YOUR CONSOLE) ==========
     
     // Products collection - public read, admin write
