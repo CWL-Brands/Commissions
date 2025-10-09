@@ -197,9 +197,14 @@ export default function DatabasePage() {
     }
 
     try {
+      // Get rep name from reps collection
+      const rep = reps.find(r => r.id === selectedRepId);
+      const repName = rep ? `${rep.firstName} ${rep.lastName}` : 'Unknown Rep';
+
       const newEntry: Partial<CommissionEntry> = {
         quarterId: selectedQuarter,
         repId: selectedRepId,
+        repName: repName,
         bucketCode: 'A',
         goalValue: 0,
         actualValue: 0,
@@ -216,7 +221,7 @@ export default function DatabasePage() {
         updatedAt: Timestamp.fromDate(newEntry.updatedAt!),
       });
 
-      toast.success('Entry created');
+      toast.success('Bonus entry created');
       await loadEntries(user.uid);
     } catch (error) {
       console.error('Error creating entry:', error);
@@ -396,33 +401,61 @@ export default function DatabasePage() {
     const endDate = new Date(year, endMonth, 0).toISOString();
 
     setCalculating(true);
-    const loadingToast = toast.loading('Calculating commissions from Fishbowl data... This may take a moment.');
+    const loadingToast = toast.loading('Calculating bonuses from Fishbowl data... This may take a moment.');
     
     try {
-      // Calculate for current user or selected rep
-      const targetUserId = filterRep === 'all' ? user.uid : filterRep;
-      
-      const response = await fetch('/api/calculate-commissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: targetUserId,
-          quarterId: selectedQuarter,
-          startDate,
-          endDate,
-        }),
-      });
+      // Determine which reps to calculate for
+      const targetReps = filterRep === 'all' 
+        ? reps.filter(r => r.active) // All active reps
+        : reps.filter(r => r.id === filterRep); // Just selected rep
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Calculation failed');
+      if (targetReps.length === 0) {
+        throw new Error('No active reps found');
       }
 
-      toast.success(`✅ Commissions calculated! Total Revenue: $${data.results.totalRevenue.toFixed(2)} | ${data.results.lineItemCount} line items processed`, {
-        id: loadingToast,
-        duration: 5000,
-      });
+      let totalRevenue = 0;
+      let totalLineItems = 0;
+      let successCount = 0;
+
+      // Calculate for each rep
+      for (const rep of targetReps) {
+        try {
+          toast.loading(`Calculating for ${rep.firstName} ${rep.lastName}... (${successCount + 1}/${targetReps.length})`, {
+            id: loadingToast,
+          });
+
+          const response = await fetch('/api/calculate-commissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: rep.id,
+              quarterId: selectedQuarter,
+              startDate,
+              endDate,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            totalRevenue += data.results.totalRevenue || 0;
+            totalLineItems += data.results.lineItemCount || 0;
+            successCount++;
+          } else {
+            console.error(`Failed for ${rep.firstName} ${rep.lastName}:`, data.error);
+          }
+        } catch (repError) {
+          console.error(`Error calculating for ${rep.firstName} ${rep.lastName}:`, repError);
+        }
+      }
+
+      toast.success(
+        `✅ Bonuses calculated for ${successCount}/${targetReps.length} reps! Total Revenue: $${totalRevenue.toFixed(2)} | ${totalLineItems} line items processed`,
+        {
+          id: loadingToast,
+          duration: 5000,
+        }
+      );
       
       // Reload entries to show new calculations
       await loadEntries(user.uid);
@@ -516,8 +549,8 @@ export default function DatabasePage() {
               </button>
               <DatabaseIcon className="w-8 h-8 text-primary-600 mr-3" />
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Commission Database</h1>
-                <p className="text-sm text-gray-600">View and manage quarterly commission data</p>
+                <h1 className="text-xl font-bold text-gray-900">Bonus Database</h1>
+                <p className="text-sm text-gray-600">View and manage quarterly bonus data</p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
@@ -527,7 +560,7 @@ export default function DatabasePage() {
                     onClick={calculateCommissions}
                     disabled={calculating || !selectedQuarter}
                     className="btn btn-primary flex items-center"
-                    title="Calculate commissions from Fishbowl data"
+                    title="Calculate bonuses from Fishbowl data"
                   >
                     {calculating ? (
                       <>
@@ -537,7 +570,7 @@ export default function DatabasePage() {
                     ) : (
                       <>
                         <Calculator className="w-4 h-4 mr-2" />
-                        Calculate Commissions
+                        Calculate Bonuses
                       </>
                     )}
                   </button>

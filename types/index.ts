@@ -70,6 +70,7 @@ export interface CommissionEntry {
   id: string;
   quarterId: string;
   repId: string;
+  repName?: string; // Rep's full name for display
   bucketCode: 'A' | 'B' | 'C' | 'D';
   subGoalId?: string; // For B/D buckets
   subGoalLabel?: string; // Human-readable label
