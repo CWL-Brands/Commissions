@@ -77,6 +77,7 @@ export default function SettingsPage() {
       { id: "wholesale", name: "Wholesale" }
     ]
   });
+  const [selectedTitle, setSelectedTitle] = useState<string>("Account Executive");
 
   const loadQuarters = async () => {
     try {
@@ -1312,13 +1313,17 @@ export default function SettingsPage() {
                   Select Title to Configure
                 </label>
                 <select
-                  value={commissionRates.titles[0]}
+                  value={selectedTitle}
+                  onChange={(e) => setSelectedTitle(e.target.value)}
                   className="input max-w-xs"
                 >
                   {commissionRates.titles.map((title: string) => (
                     <option key={title} value={title}>{title}</option>
                   ))}
                 </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Commission rates can be configured per title. Currently showing rates for all titles.
+                </p>
               </div>
 
               {/* Rate Matrix for Each Segment */}
