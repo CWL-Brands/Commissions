@@ -609,7 +609,7 @@ export default function DatabasePage() {
     return 'status-low';
   };
   
-  const getStatusIcon = (attainment: number) => {
+  const getStatusIcon = (attainment: number): string => {
     if (attainment >= 1.0) return '✓';
     if (attainment >= 0.75) return '→';
     return '⚠';

@@ -82,6 +82,12 @@ export default function SettingsPage() {
   });
   const [selectedTitle, setSelectedTitle] = useState<string>("Account Executive");
   const [showMonthYearModal, setShowMonthYearModal] = useState(false);
+  
+  // Commission calculation rules
+  const [commissionRules, setCommissionRules] = useState({
+    excludeShipping: true,
+    useOrderValue: true,
+  });
 
   const loadQuarters = async () => {
     try {
@@ -180,6 +186,13 @@ export default function SettingsPage() {
         console.log('Loaded commission rates from Firestore');
       } else {
         console.log('No commission rates found, using defaults');
+      }
+
+      // Load commission rules
+      const rulesDoc = await getDoc(doc(db, 'settings', 'commission_rules'));
+      if (rulesDoc.exists()) {
+        setCommissionRules(rulesDoc.data() as any);
+        console.log('Loaded commission rules from Firestore');
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -626,6 +639,20 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error saving commission rates:', error);
       toast.error('Failed to save commission rates');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveCommissionRules = async () => {
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'settings', 'commission_rules'), commissionRules);
+      toast.success('Commission rules saved successfully!');
+      console.log('Saved commission rules to Firestore:', commissionRules);
+    } catch (error) {
+      console.error('Error saving commission rules:', error);
+      toast.error('Failed to save commission rules');
     } finally {
       setSaving(false);
     }
@@ -1449,6 +1476,69 @@ export default function SettingsPage() {
                   <Calculator className="w-4 h-4 mr-2" />
                   {saving ? 'Calculating...' : 'Calculate Commissions'}
                 </button>
+              </div>
+            </div>
+
+            {/* Commission Calculation Rules */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">Commission Calculation Rules</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Configure how commissions are calculated from Fishbowl data
+                  </p>
+                </div>
+                <button
+                  onClick={handleSaveCommissionRules}
+                  disabled={saving}
+                  className="btn btn-primary flex items-center"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  {saving ? 'Saving...' : 'Save Rules'}
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Exclude Shipping */}
+                <div className="flex items-start p-4 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="excludeShipping"
+                    checked={commissionRules.excludeShipping}
+                    onChange={(e) => setCommissionRules({...commissionRules, excludeShipping: e.target.checked})}
+                    className="mt-1 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="excludeShipping" className="ml-3 flex-1">
+                    <span className="text-sm font-medium text-gray-900">Exclude Shipping from Commissions</span>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Line items with Product = &quot;Shipping&quot; will not count toward commission calculations
+                    </p>
+                  </label>
+                </div>
+
+                {/* Use Order Value */}
+                <div className="flex items-start p-4 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="useOrderValue"
+                    checked={commissionRules.useOrderValue}
+                    onChange={(e) => setCommissionRules({...commissionRules, useOrderValue: e.target.checked})}
+                    className="mt-1 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="useOrderValue" className="ml-3 flex-1">
+                    <span className="text-sm font-medium text-gray-900">Use Order Value (not Revenue)</span>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Calculate commissions based on orderValue field instead of revenue field from Fishbowl data
+                    </p>
+                  </label>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-800">
+                    <strong>Note:</strong> These rules apply to both monthly commissions and quarterly bonus calculations. 
+                    Changes will take effect on the next calculation run.
+                  </p>
+                </div>
               </div>
             </div>
 
