@@ -14,7 +14,10 @@ import {
   Target,
   DollarSign,
   Calendar,
-  Users
+  Users,
+  ChevronDown,
+  ChevronRight,
+  Package
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionEntry, RepPerformance, BucketPerformance } from '@/types';
@@ -64,6 +67,8 @@ export default function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState('');
   const [monthlySummaries, setMonthlySummaries] = useState<MonthlyCommissionSummary[]>([]);
   const [monthlyDetails, setMonthlyDetails] = useState<MonthlyCommissionDetail[]>([]);
+  const [monthlyViewMode, setMonthlyViewMode] = useState<'summary' | 'detailed'>('summary');
+  const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -122,6 +127,52 @@ export default function ReportsPage() {
     } catch (error) {
       console.error('Error loading monthly data:', error);
     }
+  };
+
+  // Group monthly details by customer
+  const groupOrdersByCustomer = () => {
+    const grouped = new Map<string, {
+      customerName: string;
+      customerStatus: string;
+      customerSegment: string;
+      commissionRate: number;
+      orders: MonthlyCommissionDetail[];
+      totalRevenue: number;
+      totalCommission: number;
+    }>();
+
+    monthlyDetails.forEach((detail) => {
+      if (!grouped.has(detail.customerName)) {
+        grouped.set(detail.customerName, {
+          customerName: detail.customerName,
+          customerStatus: detail.customerStatus,
+          customerSegment: detail.customerSegment,
+          commissionRate: detail.commissionRate,
+          orders: [],
+          totalRevenue: 0,
+          totalCommission: 0,
+        });
+      }
+
+      const customer = grouped.get(detail.customerName)!;
+      customer.orders.push(detail);
+      customer.totalRevenue += detail.orderRevenue;
+      customer.totalCommission += detail.commissionAmount;
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => 
+      a.customerName.localeCompare(b.customerName)
+    );
+  };
+
+  const toggleCustomer = (customerName: string) => {
+    const newExpanded = new Set(expandedCustomers);
+    if (newExpanded.has(customerName)) {
+      newExpanded.delete(customerName);
+    } else {
+      newExpanded.add(customerName);
+    }
+    setExpandedCustomers(newExpanded);
   };
 
   const loadReportData = async (userId: string, admin: boolean) => {
@@ -649,51 +700,157 @@ export default function ReportsPage() {
 
                 {/* Detailed Orders */}
                 <div className="card">
-                  <h2 className="text-xl font-semibold text-gray-900 mb-4">Detailed Orders</h2>
-                  <div className="overflow-x-auto">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Order #</th>
-                          <th>Customer</th>
-                          <th>Segment</th>
-                          <th>Status</th>
-                          <th className="text-right">Revenue</th>
-                          <th className="text-right">Rate</th>
-                          <th className="text-right">Commission</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {monthlyDetails.length === 0 ? (
-                          <tr>
-                            <td colSpan={7} className="text-center text-gray-500 py-8">
-                              No orders found for {selectedMonth}
-                            </td>
-                          </tr>
-                        ) : (
-                          monthlyDetails.map((detail) => (
-                            <tr key={detail.id}>
-                              <td className="text-sm font-medium">{detail.orderNum}</td>
-                              <td className="text-sm">{detail.customerName}</td>
-                              <td>
-                                <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
-                                  {detail.customerSegment}
-                                </span>
-                              </td>
-                              <td>
-                                <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
-                                  {detail.customerStatus}
-                                </span>
-                              </td>
-                              <td className="text-right">{formatCurrency(detail.orderRevenue)}</td>
-                              <td className="text-right text-gray-600">{detail.commissionRate.toFixed(2)}%</td>
-                              <td className="text-right font-bold text-green-600">{formatCurrency(detail.commissionAmount)}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900">Detailed Orders</h2>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => setMonthlyViewMode('summary')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          monthlyViewMode === 'summary'
+                            ? 'bg-primary-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Summary View
+                      </button>
+                      <button
+                        onClick={() => setMonthlyViewMode('detailed')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          monthlyViewMode === 'detailed'
+                            ? 'bg-primary-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Detailed by Customer
+                      </button>
+                    </div>
                   </div>
+                  {monthlyViewMode === 'summary' ? (
+                    <div className="overflow-x-auto">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Order #</th>
+                            <th>Customer</th>
+                            <th>Segment</th>
+                            <th>Status</th>
+                            <th className="text-right">Revenue</th>
+                            <th className="text-right">Rate</th>
+                            <th className="text-right">Commission</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthlyDetails.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="text-center text-gray-500 py-8">
+                                No orders found for {selectedMonth}
+                              </td>
+                            </tr>
+                          ) : (
+                            monthlyDetails.map((detail) => (
+                              <tr key={detail.id}>
+                                <td className="text-sm font-medium">{detail.orderNum}</td>
+                                <td className="text-sm">{detail.customerName}</td>
+                                <td>
+                                  <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                                    {detail.customerSegment}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
+                                    {detail.customerStatus}
+                                  </span>
+                                </td>
+                                <td className="text-right">{formatCurrency(detail.orderRevenue)}</td>
+                                <td className="text-right text-gray-600">{detail.commissionRate.toFixed(2)}%</td>
+                                <td className="text-right font-bold text-green-600">{formatCurrency(detail.commissionAmount)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {monthlyDetails.length === 0 ? (
+                        <div className="text-center text-gray-500 py-8">
+                          No orders found for {selectedMonth}
+                        </div>
+                      ) : (
+                        groupOrdersByCustomer().map((customer) => (
+                          <div key={customer.customerName} className="border border-gray-200 rounded-lg overflow-hidden">
+                            {/* Customer Header */}
+                            <div
+                              className="bg-gray-50 p-4 cursor-pointer hover:bg-gray-100 transition-colors"
+                              onClick={() => toggleCustomer(customer.customerName)}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-3">
+                                  {expandedCustomers.has(customer.customerName) ? (
+                                    <ChevronDown className="w-5 h-5 text-gray-600" />
+                                  ) : (
+                                    <ChevronRight className="w-5 h-5 text-gray-600" />
+                                  )}
+                                  <Package className="w-5 h-5 text-primary-600" />
+                                  <div>
+                                    <h3 className="font-semibold text-gray-900">{customer.customerName}</h3>
+                                    <div className="flex items-center space-x-2 mt-1">
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800">
+                                        {customer.customerSegment}
+                                      </span>
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800">
+                                        {customer.customerStatus}
+                                      </span>
+                                      <span className="text-xs text-gray-600">
+                                        {customer.commissionRate.toFixed(1)}% rate
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-sm text-gray-600">{customer.orders.length} orders</div>
+                                  <div className="text-lg font-semibold text-gray-900">{formatCurrency(customer.totalRevenue)}</div>
+                                  <div className="text-sm font-bold text-green-600">{formatCurrency(customer.totalCommission)} comm</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Expanded Orders */}
+                            {expandedCustomers.has(customer.customerName) && (
+                              <div className="bg-white">
+                                <table className="w-full">
+                                  <thead className="bg-gray-100 border-t border-gray-200">
+                                    <tr>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">Order #</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">Date</th>
+                                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">Revenue</th>
+                                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">Rate</th>
+                                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">Commission</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {customer.orders.map((order) => (
+                                      <tr key={order.id} className="border-t border-gray-100 hover:bg-gray-50">
+                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{order.orderNum}</td>
+                                        <td className="px-4 py-3 text-sm text-gray-600">
+                                          {order.orderDate?.toDate?.().toLocaleDateString() || '-'}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-right">{formatCurrency(order.orderRevenue)}</td>
+                                        <td className="px-4 py-3 text-sm text-right text-gray-600">{order.commissionRate.toFixed(2)}%</td>
+                                        <td className="px-4 py-3 text-sm text-right font-semibold text-green-600">
+                                          {formatCurrency(order.commissionAmount)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               </>
             )}
