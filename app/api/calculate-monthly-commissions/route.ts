@@ -63,24 +63,23 @@ export async function POST(request: NextRequest) {
     });
     console.log(`Loaded ${customersMap.size} customers with account types`);
 
-    // Get all reps - map by BOTH salesPerson (long name from Fishbowl) AND fishbowlUsername
-    const repsSnapshot = await adminDb.collection('reps').get();
+    // Get all users (sales reps) - map by salesPerson field
+    const usersSnapshot = await adminDb.collection('users')
+      .where('role', '==', 'sales')
+      .where('isActive', '==', true)
+      .get();
+    
     const repsMap = new Map();
-    repsSnapshot.forEach(doc => {
+    usersSnapshot.forEach(doc => {
       const data = doc.data();
-      const repData = { id: doc.id, ...data };
+      const repData = { id: doc.id, ...data, active: data.isActive }; // Normalize active field
       
-      // Map by salesPerson if it exists (long name like "Jared", "BenW", "DerekW")
+      // Map by salesPerson (e.g., "JaredM", "BenW", "DerekS", "BrandonG")
       if (data.salesPerson) {
         repsMap.set(data.salesPerson, repData);
       }
       
-      // Also map by fishbowlUsername for backwards compatibility
-      if (data.fishbowlUsername) {
-        repsMap.set(data.fishbowlUsername, repData);
-      }
-      
-      // Also map by name (first name only) to catch cases like "Jared" -> "Jared"
+      // Also map by name (first name only) to catch cases like "Jared" -> "Jared Leuzinger"
       if (data.name) {
         const firstName = data.name.split(' ')[0];
         if (!repsMap.has(firstName)) {
@@ -88,6 +87,8 @@ export async function POST(request: NextRequest) {
         }
       }
     });
+    
+    console.log(`Loaded ${repsMap.size} active sales reps from users collection`);
 
     // Query Fishbowl sales orders for the specified month
     const commissionMonth = `${year}-${month.padStart(2, '0')}`;

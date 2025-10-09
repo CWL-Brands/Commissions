@@ -226,11 +226,26 @@ export default function SettingsPage() {
       });
       setActivities(activitiesData);
 
-      // Load reps
-      const repsSnapshot = await getDocs(collection(db, 'reps'));
+      // Load reps from users collection (sales role only)
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'sales')
+      );
+      const usersSnapshot = await getDocs(usersQuery);
       const repsData: any[] = [];
-      repsSnapshot.forEach((doc) => {
-        repsData.push({ id: doc.id, ...doc.data() });
+      usersSnapshot.forEach((doc) => {
+        const userData = doc.data();
+        repsData.push({
+          id: doc.id,
+          name: userData.name,
+          email: userData.email,
+          title: userData.title,
+          salesPerson: userData.salesPerson, // This is the Fishbowl username
+          fishbowlUsername: userData.salesPerson, // Alias for compatibility
+          active: userData.isActive,
+          startDate: userData.createdAt,
+          notes: userData.notes || ''
+        });
       });
       setReps(repsData);
 
@@ -733,16 +748,31 @@ export default function SettingsPage() {
       for (const rep of reps) {
         const { id, ...data } = rep;
         
-        // Auto-set salesPerson field from fishbowlUsername for commission calculations
-        // This ensures the rep can be found when processing Fishbowl orders
-        if (data.fishbowlUsername) {
-          data.salesPerson = data.fishbowlUsername;
+        // Map to users collection schema
+        const userData: any = {
+          name: data.name,
+          email: data.email,
+          title: data.title,
+          salesPerson: data.fishbowlUsername || data.salesPerson, // Fishbowl username
+          isActive: data.active,
+          role: 'sales',
+          isCommissioned: true,
+          updatedAt: new Date()
+        };
+        
+        if (data.notes) {
+          userData.notes = data.notes;
         }
         
         if (id.startsWith('new_')) {
-          await addDoc(collection(db, 'reps'), data);
+          // Creating new user - need more fields
+          userData.createdAt = new Date();
+          userData.passwordChanged = false;
+          userData.photoUrl = null;
+          await addDoc(collection(db, 'users'), userData);
         } else {
-          await updateDoc(doc(db, 'reps', id), data);
+          // Updating existing user
+          await updateDoc(doc(db, 'users', id), userData);
         }
       }
       toast.success('Sales reps saved successfully');
@@ -840,9 +870,13 @@ export default function SettingsPage() {
     console.log('Loading customers...');
     try {
       // Load reps first to map salesPerson to rep names
-      const repsSnapshot = await getDocs(collection(db, 'reps'));
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'sales')
+      );
+      const usersSnapshot = await getDocs(usersQuery);
       const repsMap = new Map();
-      repsSnapshot.forEach((doc) => {
+      usersSnapshot.forEach((doc) => {
         const data = doc.data();
         if (data.salesPerson) {
           repsMap.set(data.salesPerson, data.name);
