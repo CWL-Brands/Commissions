@@ -186,28 +186,60 @@ export default function DatabasePage() {
   };
 
   const loadCustomers = async () => {
+    console.log('Loading customers...');
     try {
-      const customersQuery = query(
-        collection(db, 'fishbowl_customers'),
-        orderBy('customerName', 'asc')
-      );
+      // Load reps first to map salesPerson to rep names
+      const repsSnapshot = await getDocs(collection(db, 'reps'));
+      const repsMap = new Map();
+      repsSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.salesPerson) {
+          repsMap.set(data.salesPerson, data.name || data.salesPerson);
+        }
+      });
+      console.log(`Loaded ${repsMap.size} reps for mapping`);
+
+      // Get customers and their sales rep from most recent order
+      const snapshot = await getDocs(collection(db, 'fishbowl_customers'));
+      console.log(`Found ${snapshot.size} customers in Firestore`);
       
-      const snapshot = await getDocs(customersQuery);
+      // Get sales rep for each customer from their orders
+      const ordersSnapshot = await getDocs(collection(db, 'fishbowl_sales_orders'));
+      const customerSalesRepMap = new Map();
+      ordersSnapshot.forEach(doc => {
+        const order = doc.data();
+        if (order.customerId && order.salesPerson) {
+          customerSalesRepMap.set(order.customerId, order.salesPerson);
+        }
+      });
+      console.log(`Mapped ${customerSalesRepMap.size} customers to sales reps from orders`);
+      
       const customersData: any[] = [];
       
       snapshot.forEach((doc) => {
         const data = doc.data();
+        const customerId = data.id;
+        const fishbowlUsername = customerSalesRepMap.get(customerId) || data.salesPerson || data.salesRep || '';
+        const repName = repsMap.get(fishbowlUsername) || fishbowlUsername || 'Unassigned';
+        
         customersData.push({
           id: doc.id,
-          customerNum: data.customerNum || data.customerNumber || '',
-          customerName: data.customerName || data.name || '',
+          customerNum: data.id || data.accountNumber?.toString() || doc.id,
+          customerName: data.name || data.customerContact || 'Unknown',
           accountType: data.accountType || 'Retail',
-          salesPerson: data.salesPerson || '',
-          lastOrderDate: data.lastOrderDate,
+          salesPerson: repName, // Use mapped rep name
+          fishbowlUsername: fishbowlUsername, // Keep original for filtering
+          lastOrderDate: data.lastOrderDate || data.updatedAt,
           totalOrders: data.totalOrders || 0,
+          accountNumber: data.accountNumber,
         });
       });
       
+      // Sort by customer name
+      customersData.sort((a, b) => a.customerName.localeCompare(b.customerName));
+      
+      console.log('Loaded customers:', customersData.length);
+      console.log('Sample customer:', customersData[0]);
       setCustomers(customersData);
       setFilteredCustomers(customersData);
     } catch (error) {
@@ -238,12 +270,15 @@ export default function DatabasePage() {
   };
 
   useEffect(() => {
-    if (activeTab === 'customers') {
+    if (activeTab === 'customers' && isAdmin) {
       loadCustomers();
     }
-  }, [activeTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isAdmin]);
 
   useEffect(() => {
+    if (activeTab !== 'customers') return;
+    
     let filtered = customers;
 
     if (searchTerm) {
@@ -262,7 +297,7 @@ export default function DatabasePage() {
     }
 
     setFilteredCustomers(filtered);
-  }, [searchTerm, selectedRep, selectedAccountType, customers]);
+  }, [searchTerm, selectedRep, selectedAccountType, customers, activeTab]);
 
   const createNewEntry = async () => {
     if (!user || !config) return;
