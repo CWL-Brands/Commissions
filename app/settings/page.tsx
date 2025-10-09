@@ -21,6 +21,7 @@ import {
 import toast from 'react-hot-toast';
 import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole } from '@/types';
 import { validateWeightsSum } from '@/lib/commission/calculator';
+import MonthYearModal from '@/components/MonthYearModal';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -79,6 +80,7 @@ export default function SettingsPage() {
     ]
   });
   const [selectedTitle, setSelectedTitle] = useState<string>("Account Executive");
+  const [showMonthYearModal, setShowMonthYearModal] = useState(false);
 
   const loadQuarters = async () => {
     try {
@@ -592,6 +594,34 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error saving commission rates:', error);
       toast.error('Failed to save commission rates');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCalculateMonthlyCommissions = async (month: string, year: number) => {
+    setSaving(true);
+    const loadingToast = toast.loading('Calculating monthly commissions...');
+    
+    try {
+      const response = await fetch('/api/calculate-monthly-commissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, year })
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Calculation failed');
+      }
+      
+      toast.success(
+        `✅ Calculated ${data.commissionsCalculated} commissions! Total: $${data.totalCommission.toFixed(2)}`,
+        { id: loadingToast, duration: 5000 }
+      );
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to calculate commissions', { id: loadingToast });
     } finally {
       setSaving(false);
     }
@@ -1299,38 +1329,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <button
-                  onClick={async () => {
-                    const month = prompt('Enter month (01-12):', new Date().getMonth().toString().padStart(2, '0'));
-                    const year = prompt('Enter year:', new Date().getFullYear().toString());
-                    
-                    if (!month || !year) return;
-                    
-                    setSaving(true);
-                    const loadingToast = toast.loading('Calculating monthly commissions...');
-                    
-                    try {
-                      const response = await fetch('/api/calculate-monthly-commissions', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ month, year })
-                      });
-                      
-                      const data = await response.json();
-                      
-                      if (!response.ok) {
-                        throw new Error(data.error || 'Calculation failed');
-                      }
-                      
-                      toast.success(
-                        `✅ Calculated ${data.commissionsCalculated} commissions! Total: $${data.totalCommission.toFixed(2)}`,
-                        { id: loadingToast, duration: 5000 }
-                      );
-                    } catch (error: any) {
-                      toast.error(error.message || 'Failed to calculate commissions', { id: loadingToast });
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
+                  onClick={() => setShowMonthYearModal(true)}
                   disabled={saving}
                   className="btn btn-success flex items-center"
                 >
@@ -1809,6 +1808,15 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+
+      {/* Month/Year Selection Modal */}
+      <MonthYearModal
+        isOpen={showMonthYearModal}
+        onClose={() => setShowMonthYearModal(false)}
+        onSubmit={handleCalculateMonthlyCommissions}
+        title="Calculate Monthly Commissions"
+        description="Select the month and year to process Fishbowl sales orders"
+      />
     </div>
   );
 }
