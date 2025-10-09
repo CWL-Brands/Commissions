@@ -4,29 +4,66 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
 import { 
   FileText, 
   ArrowLeft,
   Download,
   TrendingUp,
   Award,
-  Target
+  Target,
+  DollarSign,
+  Calendar,
+  Users
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CommissionEntry, RepPerformance, BucketPerformance } from '@/types';
 import { formatAttainment, formatCurrency } from '@/lib/commission/calculator';
 import * as XLSX from 'xlsx';
 
+interface MonthlyCommissionSummary {
+  id: string;
+  salesPerson: string;
+  repName: string;
+  month: string;
+  year: number;
+  totalOrders: number;
+  totalRevenue: number;
+  totalCommission: number;
+  paidStatus: string;
+}
+
+interface MonthlyCommissionDetail {
+  id: string;
+  repName: string;
+  salesPerson: string;
+  orderNum: string;
+  customerName: string;
+  customerSegment: string;
+  customerStatus: string;
+  orderRevenue: number;
+  commissionRate: number;
+  commissionAmount: number;
+  orderDate: any;
+}
+
 export default function ReportsPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly'>('quarterly');
+  
+  // Quarterly Bonus State
   const [selectedQuarter, setSelectedQuarter] = useState('Q1-2025');
   const [entries, setEntries] = useState<CommissionEntry[]>([]);
   const [repPerformance, setRepPerformance] = useState<RepPerformance[]>([]);
   const [bucketPerformance, setBucketPerformance] = useState<BucketPerformance[]>([]);
+  
+  // Monthly Commission State
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [monthlySummaries, setMonthlySummaries] = useState<MonthlyCommissionSummary[]>([]);
+  const [monthlyDetails, setMonthlyDetails] = useState<MonthlyCommissionDetail[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -38,21 +75,60 @@ export default function ReportsPage() {
       setUser(user);
       
       const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',') || [];
-      setIsAdmin(adminEmails.includes(user.email || ''));
+      const admin = adminEmails.includes(user.email || '');
+      setIsAdmin(admin);
       
-      await loadReportData(user.uid);
+      await loadReportData(user.uid, admin);
+      await loadMonthlyData(user.uid, admin);
       setLoading(false);
     });
 
     return () => unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, selectedQuarter]);
+  }, [router, selectedQuarter, selectedMonth]);
 
-  const loadReportData = async (userId: string) => {
+  const loadMonthlyData = async (userId: string, admin: boolean) => {
+    try {
+      // Load monthly summaries
+      const summariesQuery = admin
+        ? query(collection(db, 'monthly_commission_summary'), orderBy('month', 'desc'))
+        : query(collection(db, 'monthly_commission_summary'), where('salesPerson', '==', userId), orderBy('month', 'desc'));
+      
+      const summariesSnapshot = await getDocs(summariesQuery);
+      const summariesData: MonthlyCommissionSummary[] = [];
+      summariesSnapshot.forEach((doc) => {
+        summariesData.push({ id: doc.id, ...doc.data() } as MonthlyCommissionSummary);
+      });
+      setMonthlySummaries(summariesData);
+
+      // Set default month
+      if (summariesData.length > 0 && !selectedMonth) {
+        setSelectedMonth(summariesData[0].month);
+      }
+
+      // Load details if month is selected
+      if (selectedMonth) {
+        const detailsQuery = admin
+          ? query(collection(db, 'monthly_commissions'), where('commissionMonth', '==', selectedMonth))
+          : query(collection(db, 'monthly_commissions'), where('commissionMonth', '==', selectedMonth), where('salesPerson', '==', userId));
+        
+        const detailsSnapshot = await getDocs(detailsQuery);
+        const detailsData: MonthlyCommissionDetail[] = [];
+        detailsSnapshot.forEach((doc) => {
+          detailsData.push({ id: doc.id, ...doc.data() } as MonthlyCommissionDetail);
+        });
+        setMonthlyDetails(detailsData);
+      }
+    } catch (error) {
+      console.error('Error loading monthly data:', error);
+    }
+  };
+
+  const loadReportData = async (userId: string, admin: boolean) => {
     try {
       // Load all entries for the quarter
       const entriesRef = collection(db, 'commission_entries');
-      const q = isAdmin
+      const q = admin
         ? query(entriesRef, where('quarterId', '==', selectedQuarter))
         : query(entriesRef, where('repId', '==', userId), where('quarterId', '==', selectedQuarter));
       
@@ -72,7 +148,7 @@ export default function ReportsPage() {
       setEntries(entriesData);
       
       // Calculate rep performance
-      if (isAdmin) {
+      if (admin) {
         calculateRepPerformance(entriesData);
       }
       
@@ -269,8 +345,8 @@ export default function ReportsPage() {
               </button>
               <FileText className="w-8 h-8 text-primary-600 mr-3" />
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Commission Reports</h1>
-                <p className="text-sm text-gray-600">Quarterly summaries and performance analytics</p>
+                <h1 className="text-xl font-bold text-gray-900">Full Compensation Report</h1>
+                <p className="text-sm text-gray-600">View your complete quarterly bonuses and monthly commissions</p>
               </div>
             </div>
             <button
@@ -282,25 +358,56 @@ export default function ReportsPage() {
             </button>
           </div>
         </div>
+        
+        {/* Tabs */}
+        <div className="container mx-auto px-4">
+          <div className="flex border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('quarterly')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'quarterly'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+              }`}
+            >
+              <Award className="w-4 h-4 inline mr-2" />
+              Quarterly Bonuses
+            </button>
+            <button
+              onClick={() => setActiveTab('monthly')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'monthly'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+              }`}
+            >
+              <DollarSign className="w-4 h-4 inline mr-2" />
+              Monthly Commissions
+            </button>
+          </div>
+        </div>
       </header>
 
       <div className="container mx-auto px-4 py-8 max-w-6xl">
-        {/* Quarter Selector */}
-        <div className="card mb-8">
-          <div className="flex items-center space-x-4">
-            <label className="text-sm font-medium text-gray-700">Select Quarter:</label>
-            <select
-              value={selectedQuarter}
-              onChange={(e) => setSelectedQuarter(e.target.value)}
-              className="input"
-            >
-              <option value="Q1-2025">Q1 2025</option>
-              <option value="Q2-2025">Q2 2025</option>
-              <option value="Q3-2025">Q3 2025</option>
-              <option value="Q4-2025">Q4 2025</option>
-            </select>
-          </div>
-        </div>
+        {/* QUARTERLY BONUS TAB */}
+        {activeTab === 'quarterly' && (
+          <>
+            {/* Quarter Selector */}
+            <div className="card mb-8">
+              <div className="flex items-center space-x-4">
+                <label className="text-sm font-medium text-gray-700">Select Quarter:</label>
+                <select
+                  value={selectedQuarter}
+                  onChange={(e) => setSelectedQuarter(e.target.value)}
+                  className="input"
+                >
+                  <option value="Q1-2025">Q1 2025</option>
+                  <option value="Q2-2025">Q2 2025</option>
+                  <option value="Q3-2025">Q3 2025</option>
+                  <option value="Q4-2025">Q4 2025</option>
+                </select>
+              </div>
+            </div>
 
         {/* KPI Cards */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
@@ -448,6 +555,158 @@ export default function ReportsPage() {
             </table>
           </div>
         </div>
+          </>
+        )}
+
+        {/* MONTHLY COMMISSIONS TAB */}
+        {activeTab === 'monthly' && (
+          <>
+            {/* Month Selector */}
+            <div className="card mb-8">
+              <div className="flex items-center space-x-4">
+                <label className="text-sm font-medium text-gray-700">Select Month:</label>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="input"
+                >
+                  <option value="">Select Month</option>
+                  {Array.from(new Set(monthlySummaries.map(s => s.month))).sort().reverse().map((month) => (
+                    <option key={month} value={month}>{month}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {selectedMonth && (
+              <>
+                {/* Monthly Stats */}
+                <div className="grid md:grid-cols-3 gap-6 mb-8">
+                  <div className="card">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-gray-600">Total Orders</h3>
+                      <Calendar className="w-5 h-5 text-green-600" />
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900">
+                      {monthlySummaries.filter(s => s.month === selectedMonth).reduce((sum, s) => sum + s.totalOrders, 0)}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">{selectedMonth}</p>
+                  </div>
+
+                  <div className="card">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-gray-600">Total Revenue</h3>
+                      <TrendingUp className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900">
+                      {formatCurrency(monthlySummaries.filter(s => s.month === selectedMonth).reduce((sum, s) => sum + s.totalRevenue, 0))}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Sales revenue</p>
+                  </div>
+
+                  <div className="card">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-gray-600">Total Commission</h3>
+                      <DollarSign className="w-5 h-5 text-green-600" />
+                    </div>
+                    <p className="text-3xl font-bold text-gray-900">
+                      {formatCurrency(monthlySummaries.filter(s => s.month === selectedMonth).reduce((sum, s) => sum + s.totalCommission, 0))}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Commission earned</p>
+                  </div>
+                </div>
+
+                {/* Monthly Summary Table */}
+                <div className="card mb-8">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-4">Commission Summary</h2>
+                  <div className="overflow-x-auto">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Rep Name</th>
+                          <th className="text-right">Orders</th>
+                          <th className="text-right">Revenue</th>
+                          <th className="text-right">Commission</th>
+                          <th className="text-right">Avg Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthlySummaries.filter(s => s.month === selectedMonth).map((summary) => (
+                          <tr key={summary.id}>
+                            <td className="font-medium">{summary.repName}</td>
+                            <td className="text-right">{summary.totalOrders}</td>
+                            <td className="text-right">{formatCurrency(summary.totalRevenue)}</td>
+                            <td className="text-right font-bold text-green-600">{formatCurrency(summary.totalCommission)}</td>
+                            <td className="text-right text-gray-600">
+                              {((summary.totalCommission / summary.totalRevenue) * 100).toFixed(2)}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Detailed Orders */}
+                <div className="card">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-4">Detailed Orders</h2>
+                  <div className="overflow-x-auto">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Order #</th>
+                          <th>Customer</th>
+                          <th>Segment</th>
+                          <th>Status</th>
+                          <th className="text-right">Revenue</th>
+                          <th className="text-right">Rate</th>
+                          <th className="text-right">Commission</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthlyDetails.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="text-center text-gray-500 py-8">
+                              No orders found for {selectedMonth}
+                            </td>
+                          </tr>
+                        ) : (
+                          monthlyDetails.map((detail) => (
+                            <tr key={detail.id}>
+                              <td className="text-sm font-medium">{detail.orderNum}</td>
+                              <td className="text-sm">{detail.customerName}</td>
+                              <td>
+                                <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                                  {detail.customerSegment}
+                                </span>
+                              </td>
+                              <td>
+                                <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
+                                  {detail.customerStatus}
+                                </span>
+                              </td>
+                              <td className="text-right">{formatCurrency(detail.orderRevenue)}</td>
+                              <td className="text-right text-gray-600">{detail.commissionRate.toFixed(2)}%</td>
+                              <td className="text-right font-bold text-green-600">{formatCurrency(detail.commissionAmount)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {!selectedMonth && (
+              <div className="card text-center py-12">
+                <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Month Selected</h3>
+                <p className="text-gray-600">Select a month from the dropdown above to view commission reports</p>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

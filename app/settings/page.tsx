@@ -382,7 +382,20 @@ export default function SettingsPage() {
     try {
       // Save quarter-specific config
       await setDoc(doc(db, 'settings', `commission_config_${selectedQuarter.replace(/ /g, '_')}`), config);
-      toast.success(`Configuration saved for ${selectedQuarter}`);
+      
+      // Save role-based bonus scales (global, not quarter-specific)
+      await setDoc(doc(db, 'settings', 'bonus_scales'), {
+        scales: config.roleScales.map(scale => ({
+          role: scale.role,
+          percentage: scale.percentage,
+          maxBonus: config.maxBonusPerRep * scale.percentage
+        })),
+        maxBonusPerRep: config.maxBonusPerRep,
+        updatedAt: new Date(),
+        updatedBy: user?.uid || 'unknown'
+      });
+      
+      toast.success(`Bonus configuration saved for ${selectedQuarter}`);
     } catch (error) {
       console.error('Error saving config:', error);
       toast.error('Failed to save configuration');
@@ -802,10 +815,10 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Role-Based Commission Scales */}
+        {/* Role-Based Bonus Scales */}
         <div className="card mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Role-Based Commission Scales</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Role-Based Bonus Scales</h2>
             <button
               onClick={addRoleScale}
               className="btn btn-secondary flex items-center"
@@ -816,7 +829,7 @@ export default function SettingsPage() {
           </div>
           
           <p className="text-sm text-gray-600 mb-4">
-            Set different commission percentages based on rep role. Max Bonus Per Rep (${config.maxBonusPerRep.toLocaleString()}) is for Sr. Account Executive (100%).
+            Set different bonus percentages based on rep role. Max Bonus Per Rep (${config.maxBonusPerRep.toLocaleString()}) is for Sr. Account Executive (100%).
           </p>
 
           <div className="space-y-3">
@@ -875,10 +888,10 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Commission Buckets */}
+        {/* Bonus Buckets */}
         <div className="card mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Commission Buckets</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Bonus Buckets</h2>
             <button
               onClick={addBucket}
               className="btn btn-secondary flex items-center"

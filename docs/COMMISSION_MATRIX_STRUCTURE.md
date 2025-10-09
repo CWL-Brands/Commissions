@@ -1,11 +1,32 @@
-# Commission Matrix Structure
+# Commission Calculator - Complete System Structure
 
-## Overview
+## 🎯 **CRITICAL: Two Separate Compensation Systems**
 
-The app needs TWO separate commission systems:
+This app manages **TWO DISTINCT** compensation systems:
 
-1. **Quarterly Bonus System** - Performance-based bonuses (existing)
-2. **Monthly Commission System** - Ongoing sales commissions (NEW)
+### 1. **Quarterly Bonus System** (Performance Bonuses)
+- **What**: Goal-based quarterly bonuses tied to performance buckets
+- **When**: Calculated quarterly (Q1, Q2, Q3, Q4)
+- **How**: Attainment % against goals → Bonus payout
+- **Max Payout**: $25,000 per rep per quarter (configurable by role)
+- **Buckets**: A (New Business), B (Product Mix), C (Maintain), D (Effort)
+- **Collections**: `commission_entries`, `commission_payouts`, `settings/commission_config`, `settings/bonus_scales`
+
+### 2. **Monthly Commission System** (Ongoing Sales Commissions)
+- **What**: Percentage-based commissions on every sales order
+- **When**: Calculated monthly from Fishbowl sales orders
+- **How**: Order revenue × Commission rate (based on title/segment/status)
+- **Rates**: Variable (3%-10%) based on customer type and rep title
+- **Collections**: `monthly_commissions`, `monthly_commission_summary`, `settings/commission_rates`
+
+---
+
+## ⚠️ **IMPORTANT TERMINOLOGY**
+
+**Quarterly System** = "BONUS" (not commission)
+**Monthly System** = "COMMISSION" (not bonus)
+
+**DO NOT MIX THESE TERMS!**
 
 ---
 
