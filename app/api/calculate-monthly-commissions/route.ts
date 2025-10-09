@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
       // Calculate commission
       let commissionAmount = 0;
       if (customerStatus === 'rep_transfer') {
-        const specialRule = commissionRates.specialRules?.repTransfer;
+        const specialRule = commissionRates?.specialRules?.repTransfer;
         if (specialRule?.enabled) {
           const flatFee = specialRule.flatFee || 0;
           const percentCommission = order.revenue * ((specialRule.percentFallback || 0) / 100);
