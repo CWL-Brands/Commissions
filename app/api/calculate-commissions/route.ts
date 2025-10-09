@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { calculateCommissions, saveCommissionResults, getSalesPersonFromEmail } from '@/lib/services/commission-calculator';
-import { getUserData } from '@/lib/copper/shared-data';
+import { calculateCommissions, saveCommissionResults } from '@/lib/services/commission-calculator';
+import { adminDb } from '@/lib/firebase/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface CalculateRequest {
-  userId: string;
+  userId: string; // This is the rep document ID from reps collection
   quarterId: string;
   startDate: string;
   endDate: string;
@@ -23,16 +23,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user email
-    const userData = await getUserData(userId);
-    if (!userData?.email) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    // Get rep data from reps collection
+    const repDoc = await adminDb.collection('reps').doc(userId).get();
+    
+    if (!repDoc.exists) {
+      return NextResponse.json({ error: 'Rep not found' }, { status: 404 });
     }
 
-    // Map email to Fishbowl sales person name
-    const salesPerson = getSalesPersonFromEmail(userData.email);
+    const repData = repDoc.data();
+    const salesPerson = repData?.salesPerson || repData?.fishbowlUsername || repData?.name || 'Unknown';
+    const repName = repData?.name || 'Unknown Rep';
 
-    console.log(`Calculating commissions for ${userData.email} (${salesPerson}) - ${quarterId}`);
+    console.log(`Calculating bonuses for ${repName} (Fishbowl: ${salesPerson}) - ${quarterId}`);
 
     // Calculate commissions from Fishbowl SO Items
     const results = await calculateCommissions({

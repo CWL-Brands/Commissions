@@ -36,19 +36,21 @@ export default function SettingsPage() {
   const [config, setConfig] = useState<CommissionConfig>({
     quarter: 'Q4 2025',
     maxBonusPerRep: 25000,
-    overPerfCap: 1.25,
-    minAttainment: 0.75,
-    buckets: [
-      { id: 'A', code: 'A', name: 'New Business', weight: 0.50, hasSubGoals: false, active: true },
-      { id: 'B', code: 'B', name: 'Product Mix', weight: 0.15, hasSubGoals: true, active: true },
-      { id: 'C', code: 'C', name: 'Maintain Business', weight: 0.20, hasSubGoals: false, active: true },
-      { id: 'D', code: 'D', name: 'Effort', weight: 0.15, hasSubGoals: true, active: true },
-    ],
+    overPerfCap: 125,
+    minAttainment: 75,
+    productSubGoals: [],
+    activitySubGoals: [],
     roleScales: [
-      { role: 'Sr. Account Executive', percentage: 1.00 },
+      { role: 'Sr. Account Executive', percentage: 1.0 },
       { role: 'Account Executive', percentage: 0.85 },
       { role: 'Jr. Account Executive', percentage: 0.70 },
       { role: 'Account Manager', percentage: 0.60 },
+    ],
+    budgets: [
+      { title: 'Sr. Account Executive', bucketA: 500000, bucketB: 100000, bucketC: 300000, bucketD: 50 },
+      { title: 'Account Executive', bucketA: 400000, bucketB: 80000, bucketC: 250000, bucketD: 40 },
+      { title: 'Jr. Account Executive', bucketA: 300000, bucketB: 60000, bucketC: 200000, bucketD: 30 },
+      { title: 'Account Manager', bucketA: 250000, bucketB: 50000, bucketC: 150000, bucketD: 25 },
     ],
   });
 
@@ -110,6 +112,15 @@ export default function SettingsPage() {
             { role: 'Account Manager', percentage: 0.60 },
           ];
         }
+        // Ensure budgets exists
+        if (!loadedConfig.budgets) {
+          loadedConfig.budgets = [
+            { title: 'Sr. Account Executive', bucketA: 500000, bucketB: 100000, bucketC: 300000, bucketD: 50 },
+            { title: 'Account Executive', bucketA: 400000, bucketB: 80000, bucketC: 250000, bucketD: 40 },
+            { title: 'Jr. Account Executive', bucketA: 300000, bucketB: 60000, bucketC: 200000, bucketD: 30 },
+            { title: 'Account Manager', bucketA: 250000, bucketB: 50000, bucketC: 150000, bucketD: 25 },
+          ];
+        }
         setConfig(loadedConfig);
       } else {
         // Load default config if quarter-specific doesn't exist
@@ -123,6 +134,15 @@ export default function SettingsPage() {
               { role: 'Account Executive', percentage: 0.85 },
               { role: 'Jr. Account Executive', percentage: 0.70 },
               { role: 'Account Manager', percentage: 0.60 },
+            ];
+          }
+          // Ensure budgets exists
+          if (!defaultConfig.budgets) {
+            defaultConfig.budgets = [
+              { title: 'Sr. Account Executive', bucketA: 500000, bucketB: 100000, bucketC: 300000, bucketD: 50 },
+              { title: 'Account Executive', bucketA: 400000, bucketB: 80000, bucketC: 250000, bucketD: 40 },
+              { title: 'Jr. Account Executive', bucketA: 300000, bucketB: 60000, bucketC: 200000, bucketD: 30 },
+              { title: 'Account Manager', bucketA: 250000, bucketB: 50000, bucketC: 150000, bucketD: 25 },
             ];
           }
           setConfig({ ...defaultConfig, quarter: selectedQuarter });
@@ -885,6 +905,87 @@ export default function SettingsPage() {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Quarterly Goals by Title */}
+        <div className="card mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Quarterly Goals by Title</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Set revenue and activity goals for each bucket based on rep title. These are used when calculating bonuses.
+          </p>
+
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Bucket A Goal ($)<br/><span className="text-xs font-normal text-gray-500">New Business Revenue</span></th>
+                  <th>Bucket B Goal ($)<br/><span className="text-xs font-normal text-gray-500">Product Mix Revenue</span></th>
+                  <th>Bucket C Goal ($)<br/><span className="text-xs font-normal text-gray-500">Maintain Business Revenue</span></th>
+                  <th>Bucket D Goal (#)<br/><span className="text-xs font-normal text-gray-500">Activities Count</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {config.budgets?.map((budget, index) => (
+                  <tr key={budget.title}>
+                    <td className="font-medium">{budget.title}</td>
+                    <td>
+                      <input
+                        type="number"
+                        value={budget.bucketA}
+                        onChange={(e) => {
+                          const newBudgets = [...(config.budgets || [])];
+                          newBudgets[index].bucketA = Number(e.target.value);
+                          setConfig({ ...config, budgets: newBudgets });
+                        }}
+                        className="input w-full"
+                        placeholder="500000"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        value={budget.bucketB}
+                        onChange={(e) => {
+                          const newBudgets = [...(config.budgets || [])];
+                          newBudgets[index].bucketB = Number(e.target.value);
+                          setConfig({ ...config, budgets: newBudgets });
+                        }}
+                        className="input w-full"
+                        placeholder="100000"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        value={budget.bucketC}
+                        onChange={(e) => {
+                          const newBudgets = [...(config.budgets || [])];
+                          newBudgets[index].bucketC = Number(e.target.value);
+                          setConfig({ ...config, budgets: newBudgets });
+                        }}
+                        className="input w-full"
+                        placeholder="300000"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        value={budget.bucketD}
+                        onChange={(e) => {
+                          const newBudgets = [...(config.budgets || [])];
+                          newBudgets[index].bucketD = Number(e.target.value);
+                          setConfig({ ...config, budgets: newBudgets });
+                        }}
+                        className="input w-full"
+                        placeholder="50"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -1681,14 +1782,22 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+              <p className="text-sm text-gray-600 mb-4">
+                <strong>Fishbowl Username</strong> is used for quarterly bonus calculations. 
+                Must match the <code className="px-1 py-0.5 bg-gray-100 rounded text-xs">salesPerson</code> field in Fishbowl (e.g., BenW, JaredM, BrandonG).
+              </p>
+
               <div className="overflow-x-auto">
                 <table className="table">
                   <thead>
                     <tr>
                       <th>Name</th>
-                      <th>Title</th>
+                      <th>Title (Bonus Tier)</th>
                       <th>Email</th>
-                      <th>Sales Person</th>
+                      <th>
+                        Fishbowl Username
+                        <span className="block text-xs font-normal text-gray-500">For Bonus Calc</span>
+                      </th>
                       <th>Start Date</th>
                       <th>Active</th>
                       <th>Notes</th>
@@ -1698,7 +1807,7 @@ export default function SettingsPage() {
                   <tbody>
                     {reps.map((rep, index) => (
                       <tr key={rep.id}>
-                        <td>
+                        <td className="min-w-[150px]">
                           <input
                             type="text"
                             value={rep.name}
@@ -1707,11 +1816,11 @@ export default function SettingsPage() {
                               newReps[index].name = e.target.value;
                               setReps(newReps);
                             }}
-                            className="input"
+                            className="input w-full"
                             placeholder="Rep Name"
                           />
                         </td>
-                        <td>
+                        <td className="min-w-[180px]">
                           <select
                             value={rep.title}
                             onChange={(e) => {
@@ -1719,7 +1828,7 @@ export default function SettingsPage() {
                               newReps[index].title = e.target.value;
                               setReps(newReps);
                             }}
-                            className="input"
+                            className="input w-full"
                           >
                             <option value="Account Executive">Account Executive</option>
                             <option value="Jr. Account Executive">Jr. Account Executive</option>
@@ -1728,7 +1837,7 @@ export default function SettingsPage() {
                             <option value="Sales Manager">Sales Manager</option>
                           </select>
                         </td>
-                        <td>
+                        <td className="min-w-[200px]">
                           <input
                             type="email"
                             value={rep.email}
@@ -1737,11 +1846,11 @@ export default function SettingsPage() {
                               newReps[index].email = e.target.value;
                               setReps(newReps);
                             }}
-                            className="input"
+                            className="input w-full"
                             placeholder="email@kanvabotanicals.com"
                           />
                         </td>
-                        <td>
+                        <td className="min-w-[140px]">
                           <input
                             type="text"
                             value={rep.salesPerson || ''}
@@ -1750,7 +1859,7 @@ export default function SettingsPage() {
                               newReps[index].salesPerson = e.target.value;
                               setReps(newReps);
                             }}
-                            className="input"
+                            className="input w-full"
                             placeholder="BenW, BrandonG, etc."
                             title="Fishbowl username for commission tracking"
                           />

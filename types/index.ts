@@ -59,6 +59,15 @@ export interface CommissionConfig {
   minAttainment: number; // e.g., 0.75 for 75%
   buckets: CommissionBucket[];
   roleScales: RoleCommissionScale[]; // Different bonus amounts by role
+  budgets?: BudgetByTitle[]; // Quarterly goals by rep title
+}
+
+export interface BudgetByTitle {
+  title: string; // Rep title (e.g., "Account Executive")
+  bucketA: number; // New Business goal ($)
+  bucketB: number; // Product Mix goal ($)
+  bucketC: number; // Maintain Business goal ($)
+  bucketD: number; // Effort goal (count)
 }
 
 export interface BucketGoal {

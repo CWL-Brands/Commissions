@@ -282,6 +282,7 @@ export async function saveCommissionResults(
   const repDoc = await db.collection('reps').doc(userId).get();
   const repData = repDoc.data();
   const repTitle = repData?.title || 'Account Executive';
+  const repName = repData?.name || 'Unknown Rep';
   
   // Find the matching budget configuration
   const budgetConfig = config?.budgets?.find((b: any) => b.title === repTitle);
@@ -295,6 +296,7 @@ export async function saveCommissionResults(
     id: bucketAId,
     quarterId,
     repId: userId,
+    repName: repName,
     bucketCode: 'A',
     goalValue: bucketAGoal,
     actualValue: results.newBusinessRevenue,
@@ -309,6 +311,7 @@ export async function saveCommissionResults(
     id: bucketCId,
     quarterId,
     repId: userId,
+    repName: repName,
     bucketCode: 'C',
     goalValue: bucketCGoal,
     actualValue: results.maintainBusinessRevenue,
@@ -328,6 +331,7 @@ export async function saveCommissionResults(
       id: bucketBId,
       quarterId,
       repId: userId,
+      repName: repName,
       bucketCode: 'B',
       subGoalId: product.productNum,
       subGoalLabel: `${product.product} (${product.category1})`,
