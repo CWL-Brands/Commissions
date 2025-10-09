@@ -904,8 +904,13 @@ export default function SettingsPage() {
       snapshot.forEach((doc) => {
         const data = doc.data();
         const customerId = data.id || data.customerNum || doc.id;
-        const fishbowlUsername = customerSalesRepMap.get(customerId) || data.salesPerson || data.salesRep || '';
-        const repName = repsMap.get(fishbowlUsername) || fishbowlUsername || 'Unassigned';
+        
+        // Get the assigned rep (from manual assignment or from orders)
+        const assignedRep = data.salesPerson || customerSalesRepMap.get(customerId) || data.salesRep || '';
+        const repName = repsMap.get(assignedRep) || assignedRep || 'Unassigned';
+        
+        // Get the original owner from Fishbowl orders
+        const originalOwner = customerSalesRepMap.get(customerId) || data.salesRep || 'Unassigned';
         
         customersData.push({
           id: doc.id,
@@ -913,8 +918,8 @@ export default function SettingsPage() {
           customerName: data.name || data.customerContact || 'Unknown',
           accountType: data.accountType || 'Retail',
           salesPerson: repName,
-          fishbowlUsername: fishbowlUsername,
-          originalOwner: data.salesPerson || fishbowlUsername || 'Unassigned', // Original from Fishbowl
+          fishbowlUsername: assignedRep, // This is what the dropdown binds to
+          originalOwner: originalOwner, // Original from Fishbowl
           shippingCity: data.shippingCity || '',
           shippingState: data.shippingState || ''
         });
