@@ -70,13 +70,17 @@ export async function POST(request: NextRequest) {
       .get();
     
     const repsMap = new Map();
+    console.log(`\n🔍 Loading sales reps from users collection...`);
     usersSnapshot.forEach(doc => {
       const data = doc.data();
       const repData = { id: doc.id, ...data, active: data.isActive }; // Normalize active field
       
+      console.log(`  Rep: ${data.name} | salesPerson: "${data.salesPerson}" | isActive: ${data.isActive}`);
+      
       // Map by salesPerson (e.g., "JaredM", "BenW", "DerekS", "BrandonG")
       if (data.salesPerson) {
         repsMap.set(data.salesPerson, repData);
+        console.log(`    ✅ Mapped by salesPerson: "${data.salesPerson}"`);
       }
       
       // Also map by name (first name only) to catch cases like "Jared" -> "Jared Leuzinger"
@@ -84,11 +88,13 @@ export async function POST(request: NextRequest) {
         const firstName = data.name.split(' ')[0];
         if (!repsMap.has(firstName)) {
           repsMap.set(firstName, repData);
+          console.log(`    ✅ Mapped by first name: "${firstName}"`);
         }
       }
     });
     
-    console.log(`Loaded ${repsMap.size} active sales reps from users collection`);
+    console.log(`\n📊 Total reps mapped: ${repsMap.size}`);
+    console.log(`📋 Rep keys in map:`, Array.from(repsMap.keys()).join(', '));
 
     // Query Fishbowl sales orders for the specified month
     const commissionMonth = `${year}-${month.padStart(2, '0')}`;
