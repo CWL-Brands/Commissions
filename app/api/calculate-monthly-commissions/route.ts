@@ -64,8 +64,9 @@ export async function POST(request: NextRequest) {
     console.log(`Loaded ${customersMap.size} customers with account types`);
 
     // Get all users (sales reps) - map by salesPerson field
+    // Use isCommissioned instead of role='sales' because some reps have role='admin'
     const usersSnapshot = await adminDb.collection('users')
-      .where('role', '==', 'sales')
+      .where('isCommissioned', '==', true)
       .where('isActive', '==', true)
       .get();
     

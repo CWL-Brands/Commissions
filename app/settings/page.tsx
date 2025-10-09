@@ -226,10 +226,10 @@ export default function SettingsPage() {
       });
       setActivities(activitiesData);
 
-      // Load reps from users collection (sales role only)
+      // Load reps from users collection (commissioned users only)
       const usersQuery = query(
         collection(db, 'users'),
-        where('role', '==', 'sales')
+        where('isCommissioned', '==', true)
       );
       const usersSnapshot = await getDocs(usersQuery);
       const repsData: any[] = [];
@@ -872,7 +872,7 @@ export default function SettingsPage() {
       // Load reps first to map salesPerson to rep names
       const usersQuery = query(
         collection(db, 'users'),
-        where('role', '==', 'sales')
+        where('isCommissioned', '==', true)
       );
       const usersSnapshot = await getDocs(usersQuery);
       const repsMap = new Map();
