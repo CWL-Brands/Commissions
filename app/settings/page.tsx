@@ -124,6 +124,13 @@ export default function SettingsPage() {
   const [selectedCity, setSelectedCity] = useState('all');
   const [selectedState, setSelectedState] = useState('all');
   const [confirmAdminChange, setConfirmAdminChange] = useState<{ customerId: string; newRep: string; customerName: string } | null>(null);
+  
+  // Batch edit state
+  const [batchEditMode, setBatchEditMode] = useState(false);
+  const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
+  const [batchAccountType, setBatchAccountType] = useState('');
+  const [batchSalesRep, setBatchSalesRep] = useState('');
+  const [savingBatch, setSavingBatch] = useState(false);
 
   // Fishbowl Import state
   const [fishbowlFile, setFishbowlFile] = useState<File | null>(null);
@@ -1026,6 +1033,75 @@ export default function SettingsPage() {
     } else {
       setSortField(field);
       setSortDirection('asc');
+    }
+  };
+
+  // Batch edit functions
+  const toggleCustomerSelection = (customerId: string) => {
+    const newSelected = new Set(selectedCustomers);
+    if (newSelected.has(customerId)) {
+      newSelected.delete(customerId);
+    } else {
+      newSelected.add(customerId);
+    }
+    setSelectedCustomers(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedCustomers.size === filteredCustomers.length) {
+      setSelectedCustomers(new Set());
+    } else {
+      setSelectedCustomers(new Set(filteredCustomers.map(c => c.id)));
+    }
+  };
+
+  const handleBatchUpdate = async () => {
+    if (selectedCustomers.size === 0) {
+      toast.error('No customers selected');
+      return;
+    }
+
+    if (!batchAccountType && !batchSalesRep) {
+      toast.error('Please select an account type or sales rep to update');
+      return;
+    }
+
+    setSavingBatch(true);
+    const loadingToast = toast.loading(`Updating ${selectedCustomers.size} customers...`);
+
+    try {
+      const updates: any = {};
+      if (batchAccountType) updates.accountType = batchAccountType;
+      if (batchSalesRep) updates.salesPerson = batchSalesRep;
+
+      // Update in Firestore
+      const promises = Array.from(selectedCustomers).map(customerId => {
+        const customerRef = doc(db, 'fishbowl_customers', customerId);
+        return updateDoc(customerRef, updates);
+      });
+
+      await Promise.all(promises);
+
+      // Update local state
+      setCustomers(prev => prev.map(c => 
+        selectedCustomers.has(c.id) ? { ...c, ...updates } : c
+      ));
+      setFilteredCustomers(prev => prev.map(c => 
+        selectedCustomers.has(c.id) ? { ...c, ...updates } : c
+      ));
+
+      toast.success(`✅ Updated ${selectedCustomers.size} customers!`, { id: loadingToast });
+      
+      // Reset batch state
+      setSelectedCustomers(new Set());
+      setBatchAccountType('');
+      setBatchSalesRep('');
+      setBatchEditMode(false);
+    } catch (error) {
+      console.error('Error batch updating customers:', error);
+      toast.error('Failed to update customers', { id: loadingToast });
+    } finally {
+      setSavingBatch(false);
     }
   };
 
@@ -2599,16 +2675,103 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* Batch Edit Actions */}
+            {batchEditMode && (
+              <div className="card bg-blue-50 border-2 border-blue-300">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-blue-900">
+                      📝 Batch Edit Mode ({selectedCustomers.size} selected)
+                    </h3>
+                    <p className="text-sm text-blue-700">Select customers and update their account type or sales rep</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setBatchEditMode(false);
+                      setSelectedCustomers(new Set());
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Update Account Type
+                    </label>
+                    <select
+                      value={batchAccountType}
+                      onChange={(e) => setBatchAccountType(e.target.value)}
+                      className="input w-full"
+                    >
+                      <option value="">Don&apos;t Change</option>
+                      <option value="Retail">Retail</option>
+                      <option value="Wholesale">Wholesale</option>
+                      <option value="Distributor">Distributor</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Assign Sales Rep
+                    </label>
+                    <select
+                      value={batchSalesRep}
+                      onChange={(e) => setBatchSalesRep(e.target.value)}
+                      className="input w-full"
+                    >
+                      <option value="">Don&apos;t Change</option>
+                      {reps.filter(r => r.active).map(rep => (
+                        <option key={rep.id} value={rep.salesPerson}>
+                          {rep.name} ({rep.salesPerson})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <button
+                      onClick={handleBatchUpdate}
+                      disabled={savingBatch || selectedCustomers.size === 0}
+                      className="btn btn-primary w-full"
+                    >
+                      {savingBatch ? '⏳ Saving...' : `💾 Update ${selectedCustomers.size} Customers`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Customers Table */}
             <div className="card">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Customers ({filteredCustomers.length})
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Customers ({filteredCustomers.length})
+                </h3>
+                <button
+                  onClick={() => setBatchEditMode(!batchEditMode)}
+                  className={`btn ${batchEditMode ? 'btn-secondary' : 'btn-primary'}`}
+                >
+                  {batchEditMode ? '❌ Cancel Batch Edit' : '📝 Batch Edit'}
+                </button>
+              </div>
 
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
+                      {batchEditMode && (
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                          <input
+                            type="checkbox"
+                            checked={selectedCustomers.size === filteredCustomers.length && filteredCustomers.length > 0}
+                            onChange={toggleSelectAll}
+                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                        </th>
+                      )}
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         <div 
                           className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
@@ -2697,13 +2860,23 @@ export default function SettingsPage() {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredCustomers.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={batchEditMode ? 9 : 8} className="px-4 py-8 text-center text-gray-500">
                           No customers found
                         </td>
                       </tr>
                     ) : (
                       filteredCustomers.map((customer) => (
                         <tr key={customer.id} className="hover:bg-gray-50">
+                          {batchEditMode && (
+                            <td className="px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={selectedCustomers.has(customer.id)}
+                                onChange={() => toggleCustomerSelection(customer.id)}
+                                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              />
+                            </td>
+                          )}
                           <td className="px-4 py-3 text-sm font-medium text-gray-900">{customer.customerNum}</td>
                           <td className="px-4 py-3 text-sm text-gray-900">{customer.customerName}</td>
                           <td className="px-4 py-3">
