@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase/config';
-import { doc, getDoc, setDoc, collection, getDocs, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { 
   Settings as SettingsIcon, 
@@ -16,11 +16,13 @@ import {
   UserPlus,
   Download,
   Calendar,
-  Calculator
+  Calculator,
+  Upload,
+  Database as DatabaseIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole } from '@/types';
-import { validateWeightsSum } from '@/lib/commission/calculator';
+import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole, CommissionEntry } from '@/types';
+import { validateWeightsSum, calculatePayout } from '@/lib/commission/calculator';
 import MonthYearModal from '@/components/MonthYearModal';
 
 export default function SettingsPage() {
@@ -30,7 +32,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q4 2025');
   const [quarters, setQuarters] = useState<string[]>(['Q4 2025', 'Q1 2026']);
-  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'team' | 'orgchart'>('quarterly');
+  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'team' | 'orgchart' | 'database'>('quarterly');
 
   // Configuration state
   const [config, setConfig] = useState<CommissionConfig>({
@@ -92,6 +94,14 @@ export default function SettingsPage() {
   // Org Chart state
   const [orgUsers, setOrgUsers] = useState<any[]>([]);
   const [selectedOrgLevel, setSelectedOrgLevel] = useState<'all' | 'vp' | 'director' | 'regional' | 'division' | 'territory' | 'rep'>('all');
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
+
+  // Database state
+  const [entries, setEntries] = useState<CommissionEntry[]>([]);
+  const [filterRep, setFilterRep] = useState('all');
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [calculating, setCalculating] = useState(false);
 
   const loadQuarters = async () => {
     try {
@@ -103,6 +113,21 @@ export default function SettingsPage() {
       setQuarters(quartersList.sort());
     } catch (error) {
       console.error('Error loading quarters:', error);
+    }
+  };
+
+  const loadOrgUsers = async () => {
+    try {
+      const usersSnapshot = await getDocs(collection(db, 'users'));
+      const usersData: any[] = [];
+      usersSnapshot.forEach((doc) => {
+        usersData.push({ id: doc.id, ...doc.data() });
+      });
+      setOrgUsers(usersData);
+      console.log('Loaded org users:', usersData.length);
+    } catch (error) {
+      console.error('Error loading org users:', error);
+      toast.error('Failed to load users');
     }
   };
 
@@ -182,14 +207,15 @@ export default function SettingsPage() {
       });
       setReps(repsData);
 
-      // Load commission rates
-      const ratesDoc = await getDoc(doc(db, 'settings', 'commission_rates'));
+      // Load commission rates for selected title
+      const titleKey = selectedTitle.replace(/\s+/g, '_');
+      const ratesDoc = await getDoc(doc(db, 'settings', `commission_rates_${titleKey}`));
       if (ratesDoc.exists()) {
         const ratesData = ratesDoc.data();
         setCommissionRates(ratesData);
-        console.log('Loaded commission rates from Firestore');
+        console.log(`Loaded commission rates for ${selectedTitle} from Firestore`);
       } else {
-        console.log('No commission rates found, using defaults');
+        console.log(`No commission rates found for ${selectedTitle}, using defaults`);
       }
 
       // Load commission rules
@@ -220,6 +246,9 @@ export default function SettingsPage() {
 
     loadQuarters();
     loadSettings();
+    if (activeTab === 'orgchart') {
+      loadOrgUsers();
+    }
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isAdmin, authLoading, router]);
@@ -229,6 +258,56 @@ export default function SettingsPage() {
       loadSettings();
     }
   }, [selectedQuarter, loadSettings]);
+
+  useEffect(() => {
+    if (activeTab === 'orgchart') {
+      loadOrgUsers();
+    }
+    if (activeTab === 'database' && user) {
+      loadEntries(user.uid);
+    }
+  }, [activeTab, user]);
+
+  // Load commission rates when title changes
+  useEffect(() => {
+    const loadRatesForTitle = async () => {
+      try {
+        const titleKey = selectedTitle.replace(/\s+/g, '_');
+        const ratesDoc = await getDoc(doc(db, 'settings', `commission_rates_${titleKey}`));
+        if (ratesDoc.exists()) {
+          const ratesData = ratesDoc.data();
+          setCommissionRates(ratesData);
+          console.log(`Loaded commission rates for ${selectedTitle}`);
+        } else {
+          // Reset to defaults if no rates found for this title
+          setCommissionRates({
+            rates: [],
+            specialRules: {
+              repTransfer: {
+                enabled: true,
+                flatFee: 0,
+                percentFallback: 2,
+                useGreater: true
+              },
+              inactivityThreshold: 12
+            },
+            titles: commissionRates.titles || [],
+            segments: commissionRates.segments || [
+              { id: "distributor", name: "Distributor" },
+              { id: "wholesale", name: "Wholesale" }
+            ]
+          });
+          console.log(`No rates found for ${selectedTitle}, using defaults`);
+        }
+      } catch (error) {
+        console.error('Error loading rates for title:', error);
+      }
+    };
+
+    if (selectedTitle && activeTab === 'monthly') {
+      loadRatesForTitle();
+    }
+  }, [selectedTitle, activeTab]);
 
   const addBucket = () => {
     const newBucket: CommissionBucket = {
@@ -637,9 +716,10 @@ export default function SettingsPage() {
   const handleSaveCommissionRates = async () => {
     setSaving(true);
     try {
-      await setDoc(doc(db, 'settings', 'commission_rates'), commissionRates);
-      toast.success('Commission rates saved successfully!');
-      console.log('Saved commission rates to Firestore:', commissionRates);
+      const titleKey = selectedTitle.replace(/\s+/g, '_');
+      await setDoc(doc(db, 'settings', `commission_rates_${titleKey}`), commissionRates);
+      toast.success(`Commission rates saved for ${selectedTitle}!`);
+      console.log(`Saved commission rates for ${selectedTitle} to Firestore:`, commissionRates);
     } catch (error) {
       console.error('Error saving commission rates:', error);
       toast.error('Failed to save commission rates');
@@ -659,6 +739,93 @@ export default function SettingsPage() {
       toast.error('Failed to save commission rules');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const loadEntries = async (userId: string) => {
+    try {
+      let q = query(
+        collection(db, 'commission_entries'),
+        where('quarterId', '==', selectedQuarter),
+        orderBy('createdAt', 'desc')
+      );
+
+      if (!isAdmin) {
+        q = query(q, where('repId', '==', userId));
+      } else if (filterRep !== 'all') {
+        q = query(q, where('repId', '==', filterRep));
+      }
+
+      const snapshot = await getDocs(q);
+      const entriesData: CommissionEntry[] = [];
+      snapshot.forEach((doc) => {
+        entriesData.push({ id: doc.id, ...doc.data() } as CommissionEntry);
+      });
+      setEntries(entriesData);
+    } catch (error) {
+      console.error('Error loading entries:', error);
+      toast.error('Failed to load commission entries');
+    }
+  };
+
+  const handleBulkUpload = async (csvText: string) => {
+    if (!isAdmin || !config || !user) {
+      toast.error('Admin access required');
+      return;
+    }
+
+    try {
+      const lines = csvText.split('\n').filter(line => line.trim());
+      const headers = lines[0].split(',').map(h => h.trim());
+      
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        const row: any = {};
+        headers.forEach((header, index) => {
+          row[header] = values[index];
+        });
+
+        try {
+          const goalValue = parseFloat(row.goalValue) || 0;
+          const actualValue = parseFloat(row.actualValue) || 0;
+
+          const result = calculatePayout({
+            goalValue: goalValue,
+            actualValue: actualValue,
+            minAttainment: config.minAttainment,
+            overPerfCap: config.overPerfCap
+          });
+
+          await addDoc(collection(db, 'commission_entries'), {
+            quarterId: row.quarterId || selectedQuarter,
+            repId: row.repId,
+            bucketCode: row.bucketCode,
+            goalValue: goalValue,
+            actualValue: actualValue,
+            attainment: result.attainment,
+            payout: result.payout,
+            subGoalId: row.subGoalId || null,
+            notes: row.notes || '',
+            createdAt: new Date(),
+            createdBy: user.uid
+          });
+
+          successCount++;
+        } catch (error) {
+          console.error('Error processing row:', error);
+          errorCount++;
+        }
+      }
+
+      toast.success(`Imported ${successCount} entries. ${errorCount} errors.`);
+      setShowUploadModal(false);
+      await loadEntries(user.uid);
+    } catch (error) {
+      console.error('Error bulk uploading:', error);
+      toast.error('Failed to upload data');
     }
   };
 
@@ -798,6 +965,16 @@ export default function SettingsPage() {
               }`}
             >
               Org Chart
+            </button>
+            <button
+              onClick={() => setActiveTab('database')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'database'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Database
             </button>
           </nav>
         </div>
@@ -2036,51 +2213,285 @@ export default function SettingsPage() {
         {/* Org Chart Tab */}
         {activeTab === 'orgchart' && (
           <div className="space-y-8">
+            {/* Header */}
             <div className="card">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">
-                🏢 Organizational Structure
-              </h2>
-              <p className="text-sm text-gray-600 mb-6">
-                Manage your sales organization hierarchy: VP Sales → Directors → Regional Managers → Division Managers → Territory Managers → Sales Reps
-              </p>
-
-              {/* Coming Soon Placeholder */}
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-8 text-center">
-                <div className="text-6xl mb-4">🚀</div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">Org Chart Builder</h3>
-                <p className="text-gray-600 mb-4">
-                  Full organizational hierarchy management coming next!
-                </p>
-                <div className="grid md:grid-cols-3 gap-4 mt-6 text-left">
-                  <div className="bg-white p-4 rounded-lg shadow-sm">
-                    <div className="font-semibold text-gray-900 mb-2">✅ Phase 1 Complete</div>
-                    <ul className="text-sm text-gray-600 space-y-1">
-                      <li>• Customer Management</li>
-                      <li>• Account Type Editing</li>
-                      <li>• Sales Rep Assignment</li>
-                      <li>• Shipping City Display</li>
-                    </ul>
-                  </div>
-                  <div className="bg-white p-4 rounded-lg shadow-sm">
-                    <div className="font-semibold text-gray-900 mb-2">🔨 Phase 2 In Progress</div>
-                    <ul className="text-sm text-gray-600 space-y-1">
-                      <li>• Unified Users Collection</li>
-                      <li>• Org Hierarchy Levels</li>
-                      <li>• Territory Mapping</li>
-                      <li>• State Assignments</li>
-                    </ul>
-                  </div>
-                  <div className="bg-white p-4 rounded-lg shadow-sm">
-                    <div className="font-semibold text-gray-900 mb-2">📋 Phase 3 Next</div>
-                    <ul className="text-sm text-gray-600 space-y-1">
-                      <li>• Add/Edit Org Levels</li>
-                      <li>• Auto-assign by State</li>
-                      <li>• Reporting Structure</li>
-                      <li>• Commission Routing</li>
-                    </ul>
-                  </div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">🏢 Organizational Structure</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Manage your sales organization hierarchy and territory assignments
+                  </p>
                 </div>
+                <button
+                  onClick={() => {
+                    setEditingUser(null);
+                    setShowAddUserModal(true);
+                  }}
+                  className="btn btn-primary flex items-center"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Add User
+                </button>
               </div>
+
+              {/* Filter by Org Level */}
+              <div className="flex items-center space-x-4">
+                <label className="text-sm font-medium text-gray-700">Filter by Level:</label>
+                <select
+                  value={selectedOrgLevel}
+                  onChange={(e) => setSelectedOrgLevel(e.target.value as any)}
+                  className="input"
+                >
+                  <option value="all">All Levels</option>
+                  <option value="vp">VP Sales</option>
+                  <option value="director">Directors</option>
+                  <option value="regional">Regional Managers</option>
+                  <option value="division">Division Managers</option>
+                  <option value="territory">Territory Managers</option>
+                  <option value="rep">Sales Reps</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Users Table */}
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Team Members ({orgUsers.filter(u => selectedOrgLevel === 'all' || u.orgRole === selectedOrgLevel).length})
+              </h3>
+
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Org Level</th>
+                      <th>Region/Territory</th>
+                      <th>Fishbowl Username</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orgUsers.filter(u => selectedOrgLevel === 'all' || u.orgRole === selectedOrgLevel).length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="text-center text-gray-500 py-8">
+                          No users found. Click &quot;Add User&quot; to get started.
+                        </td>
+                      </tr>
+                    ) : (
+                      orgUsers
+                        .filter(u => selectedOrgLevel === 'all' || u.orgRole === selectedOrgLevel)
+                        .map((user) => (
+                          <tr key={user.id}>
+                            <td className="font-medium">{user.name}</td>
+                            <td className="text-sm text-gray-600">{user.email}</td>
+                            <td className="text-sm">{user.title || user.role}</td>
+                            <td>
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                user.orgRole === 'vp' ? 'bg-purple-100 text-purple-800' :
+                                user.orgRole === 'director' ? 'bg-blue-100 text-blue-800' :
+                                user.orgRole === 'regional' ? 'bg-green-100 text-green-800' :
+                                user.orgRole === 'division' ? 'bg-yellow-100 text-yellow-800' :
+                                user.orgRole === 'territory' ? 'bg-orange-100 text-orange-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {user.orgRole === 'vp' ? 'VP Sales' :
+                                 user.orgRole === 'director' ? 'Director' :
+                                 user.orgRole === 'regional' ? 'Regional Mgr' :
+                                 user.orgRole === 'division' ? 'Division Mgr' :
+                                 user.orgRole === 'territory' ? 'Territory Mgr' :
+                                 'Sales Rep'}
+                              </span>
+                            </td>
+                            <td className="text-sm text-gray-600">
+                              {user.region || user.territory || user.division || '-'}
+                            </td>
+                            <td className="text-sm font-mono">{user.salesPerson || '-'}</td>
+                            <td>
+                              {user.isActive ? (
+                                <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                                  Active
+                                </span>
+                              ) : (
+                                <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
+                                  Inactive
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <button
+                                onClick={() => {
+                                  setEditingUser(user);
+                                  setShowAddUserModal(true);
+                                }}
+                                className="text-primary-600 hover:text-primary-800 text-sm font-medium"
+                              >
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Quick Stats */}
+            <div className="grid md:grid-cols-6 gap-4">
+              <div className="card text-center">
+                <div className="text-2xl font-bold text-purple-600">{orgUsers.filter(u => u.orgRole === 'vp').length}</div>
+                <div className="text-xs text-gray-600">VP Sales</div>
+              </div>
+              <div className="card text-center">
+                <div className="text-2xl font-bold text-blue-600">{orgUsers.filter(u => u.orgRole === 'director').length}</div>
+                <div className="text-xs text-gray-600">Directors</div>
+              </div>
+              <div className="card text-center">
+                <div className="text-2xl font-bold text-green-600">{orgUsers.filter(u => u.orgRole === 'regional').length}</div>
+                <div className="text-xs text-gray-600">Regional</div>
+              </div>
+              <div className="card text-center">
+                <div className="text-2xl font-bold text-yellow-600">{orgUsers.filter(u => u.orgRole === 'division').length}</div>
+                <div className="text-xs text-gray-600">Division</div>
+              </div>
+              <div className="card text-center">
+                <div className="text-2xl font-bold text-orange-600">{orgUsers.filter(u => u.orgRole === 'territory').length}</div>
+                <div className="text-xs text-gray-600">Territory</div>
+              </div>
+              <div className="card text-center">
+                <div className="text-2xl font-bold text-gray-600">{orgUsers.filter(u => u.orgRole === 'rep' || !u.orgRole).length}</div>
+                <div className="text-xs text-gray-600">Sales Reps</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Database Tab */}
+        {activeTab === 'database' && (
+          <div className="space-y-8">
+            {/* Header with Actions */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">📊 Commission Database</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    View and manage quarterly commission entries
+                  </p>
+                </div>
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="btn btn-primary flex items-center"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Bulk Upload
+                  </button>
+                )}
+              </div>
+
+              {/* Filters */}
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Quarter
+                  </label>
+                  <select
+                    value={selectedQuarter}
+                    onChange={(e) => setSelectedQuarter(e.target.value)}
+                    className="input w-full"
+                  >
+                    {quarters.map(q => (
+                      <option key={q} value={q}>{q}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {isAdmin && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Filter by Rep
+                    </label>
+                    <select
+                      value={filterRep}
+                      onChange={(e) => setFilterRep(e.target.value)}
+                      className="input w-full"
+                    >
+                      <option value="all">All Reps</option>
+                      {reps.map(rep => (
+                        <option key={rep.id} value={rep.id}>
+                          {rep.name} ({rep.title})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Commission Entries Table */}
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Commission Entries ({entries.length})
+              </h3>
+
+              {entries.length === 0 ? (
+                <div className="text-center py-12">
+                  <DatabaseIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 mb-2">No commission entries found</p>
+                  <p className="text-sm text-gray-400">
+                    {isAdmin ? 'Click "Bulk Upload" to import data' : 'No entries for this quarter'}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Rep</th>
+                        <th>Bucket</th>
+                        <th>Goal</th>
+                        <th>Actual</th>
+                        <th>Attainment</th>
+                        <th>Payout</th>
+                        <th>Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entries.map((entry) => {
+                        const rep = reps.find(r => r.id === entry.repId);
+                        const bucket = config?.buckets.find(b => b.code === entry.bucketCode);
+                        
+                        return (
+                          <tr key={entry.id}>
+                            <td className="font-medium">{rep?.name || 'Unknown'}</td>
+                            <td>
+                              <span className="px-2 py-1 text-xs rounded-full bg-primary-100 text-primary-800">
+                                {entry.bucketCode} - {bucket?.name || 'Unknown'}
+                              </span>
+                            </td>
+                            <td className="text-right">{formatCurrency(entry.goalValue)}</td>
+                            <td className="text-right">{formatCurrency(entry.actualValue)}</td>
+                            <td className="text-right">
+                              <span className={`font-semibold ${
+                                entry.attainment >= 1 ? 'text-green-600' : 
+                                entry.attainment >= 0.75 ? 'text-yellow-600' : 
+                                'text-red-600'
+                              }`}>
+                                {formatAttainment(entry.attainment)}
+                              </span>
+                            </td>
+                            <td className="text-right font-semibold">{formatCurrency(entry.payout)}</td>
+                            <td className="text-sm text-gray-600">{entry.notes || '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2094,6 +2505,327 @@ export default function SettingsPage() {
         title="Calculate Monthly Commissions"
         description="Select the month and year to process Fishbowl sales orders"
       />
+
+      {/* Bulk Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Bulk Upload Commission Data</h2>
+            
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-2">
+                Upload a CSV file with the following columns:
+              </p>
+              <div className="bg-gray-50 p-3 rounded text-xs font-mono">
+                quarterId, repId, bucketCode, goalValue, actualValue, subGoalId (optional), notes (optional)
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select CSV File
+              </label>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = async (event) => {
+                      const text = event.target?.result as string;
+                      await handleBulkUpload(text);
+                    };
+                    reader.readAsText(file);
+                  }
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowUploadModal(false)}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit User Modal */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {editingUser ? 'Edit User' : 'Add New User'}
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowAddUserModal(false);
+                    setEditingUser(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.currentTarget);
+                const userData = {
+                  name: formData.get('name') as string,
+                  email: formData.get('email') as string,
+                  role: formData.get('role') as string,
+                  orgRole: formData.get('orgRole') as string,
+                  title: formData.get('title') as string,
+                  salesPerson: formData.get('salesPerson') as string,
+                  region: formData.get('region') as string,
+                  regionalTerritory: formData.get('regionalTerritory') as string,
+                  division: formData.get('division') as string,
+                  territory: formData.get('territory') as string,
+                  isActive: formData.get('isActive') === 'true',
+                  isCommissioned: formData.get('isCommissioned') === 'true',
+                  updatedAt: new Date(),
+                };
+
+                try {
+                  if (editingUser) {
+                    // Update existing user
+                    await updateDoc(doc(db, 'users', editingUser.id), userData);
+                    toast.success('User updated successfully!');
+                  } else {
+                    // Create new user
+                    await addDoc(collection(db, 'users'), {
+                      ...userData,
+                      createdAt: new Date(),
+                    });
+                    toast.success('User added successfully!');
+                  }
+                  setShowAddUserModal(false);
+                  setEditingUser(null);
+                  loadOrgUsers();
+                } catch (error) {
+                  console.error('Error saving user:', error);
+                  toast.error('Failed to save user');
+                }
+              }}>
+                <div className="space-y-6">
+                  {/* Basic Info */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Name *
+                      </label>
+                      <input
+                        type="text"
+                        name="name"
+                        defaultValue={editingUser?.name || ''}
+                        required
+                        className="input w-full"
+                        placeholder="John Doe"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Email *
+                      </label>
+                      <input
+                        type="email"
+                        name="email"
+                        defaultValue={editingUser?.email || ''}
+                        required
+                        className="input w-full"
+                        placeholder="john@example.com"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Org Structure */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Organizational Level *
+                      </label>
+                      <select
+                        name="orgRole"
+                        defaultValue={editingUser?.orgRole || 'rep'}
+                        required
+                        className="input w-full"
+                      >
+                        <option value="vp">VP Sales</option>
+                        <option value="director">Director</option>
+                        <option value="regional">Regional Manager</option>
+                        <option value="division">Division Manager</option>
+                        <option value="territory">Territory Manager</option>
+                        <option value="rep">Sales Rep</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Job Title
+                      </label>
+                      <input
+                        type="text"
+                        name="title"
+                        defaultValue={editingUser?.title || ''}
+                        className="input w-full"
+                        placeholder="Account Executive"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Fishbowl Integration */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Fishbowl Username
+                    </label>
+                    <input
+                      type="text"
+                      name="salesPerson"
+                      defaultValue={editingUser?.salesPerson || ''}
+                      className="input w-full"
+                      placeholder="BenW"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Must match the salesPerson field in Fishbowl for commission calculations
+                    </p>
+                  </div>
+
+                  {/* Geographic Assignment */}
+                  <div className="border-t pt-4">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-3">Geographic Assignment</h3>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Region
+                        </label>
+                        <select name="region" defaultValue={editingUser?.region || ''} className="input w-full">
+                          <option value="">None</option>
+                          <option value="West">West</option>
+                          <option value="East">East</option>
+                          <option value="Central">Central</option>
+                          <option value="South East">South East</option>
+                          <option value="South West">South West</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Regional Territory
+                        </label>
+                        <input
+                          type="text"
+                          name="regionalTerritory"
+                          defaultValue={editingUser?.regionalTerritory || ''}
+                          className="input w-full"
+                          placeholder="Pacific Northwest"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Division
+                        </label>
+                        <input
+                          type="text"
+                          name="division"
+                          defaultValue={editingUser?.division || ''}
+                          className="input w-full"
+                          placeholder="Boise"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Territory Number
+                        </label>
+                        <input
+                          type="text"
+                          name="territory"
+                          defaultValue={editingUser?.territory || ''}
+                          className="input w-full"
+                          placeholder="01"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* System Role */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      System Role
+                    </label>
+                    <select
+                      name="role"
+                      defaultValue={editingUser?.role || 'sales'}
+                      className="input w-full"
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="sales">Sales</option>
+                    </select>
+                  </div>
+
+                  {/* Status Toggles */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="isActive"
+                        value="true"
+                        defaultChecked={editingUser?.isActive !== false}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      />
+                      <label className="ml-2 text-sm text-gray-700">
+                        Active User
+                      </label>
+                    </div>
+
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="isCommissioned"
+                        value="true"
+                        defaultChecked={editingUser?.isCommissioned !== false}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      />
+                      <label className="ml-2 text-sm text-gray-700">
+                        Eligible for Commissions
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end space-x-3 mt-6 pt-6 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddUserModal(false);
+                      setEditingUser(null);
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    {editingUser ? 'Update User' : 'Add User'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -25,15 +25,26 @@ export async function POST(request: NextRequest) {
 
     console.log(`Calculating monthly commissions for ${year}-${month}${salesPerson ? ` (${salesPerson})` : ' (all reps)'}`);
 
-    // Get commission rates from settings
-    const ratesDoc = await adminDb.collection('settings').doc('commission_rates').get();
-    if (!ratesDoc.exists) {
+    // Get commission rates from settings (load all title-specific rate documents)
+    const settingsSnapshot = await adminDb.collection('settings').get();
+    const commissionRatesByTitle = new Map();
+    
+    settingsSnapshot.forEach(doc => {
+      if (doc.id.startsWith('commission_rates_')) {
+        // Extract title from document ID (e.g., "commission_rates_Account_Executive" -> "Account Executive")
+        const titleKey = doc.id.replace('commission_rates_', '').replace(/_/g, ' ');
+        commissionRatesByTitle.set(titleKey, doc.data());
+      }
+    });
+    
+    console.log(`Loaded commission rates for ${commissionRatesByTitle.size} titles`);
+    
+    if (commissionRatesByTitle.size === 0) {
       return NextResponse.json(
-        { error: 'Commission rates not configured' },
+        { error: 'Commission rates not configured for any titles' },
         { status: 400 }
       );
     }
-    const commissionRates = ratesDoc.data();
 
     // Get commission rules from settings
     const rulesDoc = await adminDb.collection('settings').doc('commission_rules').get();
@@ -122,9 +133,16 @@ export async function POST(request: NextRequest) {
         order.postingDate
       );
 
+      // Get commission rates for this rep's title
+      const repCommissionRates = commissionRatesByTitle.get(rep.title);
+      if (!repCommissionRates) {
+        console.log(`No commission rates configured for title: ${rep.title}`);
+        continue;
+      }
+
       // Get commission rate
       const rate = getCommissionRate(
-        commissionRates,
+        repCommissionRates,
         rep.title,
         customerSegment,
         customerStatus
@@ -141,7 +159,7 @@ export async function POST(request: NextRequest) {
       // Calculate commission
       let commissionAmount = 0;
       if (customerStatus === 'rep_transfer') {
-        const specialRule = commissionRates?.specialRules?.repTransfer;
+        const specialRule = repCommissionRates?.specialRules?.repTransfer;
         if (specialRule?.enabled) {
           const flatFee = specialRule.flatFee || 0;
           const percentCommission = orderAmount * ((specialRule.percentFallback || 0) / 100);
