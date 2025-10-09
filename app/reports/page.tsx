@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment as React } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase/config';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -50,6 +50,18 @@ interface MonthlyCommissionDetail {
   orderDate: any;
 }
 
+interface OrderLineItem {
+  id: string;
+  orderNum: string;
+  productNum: string;
+  product: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  commissionAmount: number;
+}
+
 export default function ReportsPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -67,8 +79,10 @@ export default function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState('');
   const [monthlySummaries, setMonthlySummaries] = useState<MonthlyCommissionSummary[]>([]);
   const [monthlyDetails, setMonthlyDetails] = useState<MonthlyCommissionDetail[]>([]);
+  const [orderLineItems, setOrderLineItems] = useState<Map<string, OrderLineItem[]>>(new Map());
   const [monthlyViewMode, setMonthlyViewMode] = useState<'summary' | 'detailed'>('summary');
   const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set());
+  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -173,6 +187,57 @@ export default function ReportsPage() {
       newExpanded.add(customerName);
     }
     setExpandedCustomers(newExpanded);
+  };
+
+  const toggleOrder = async (orderNum: string, commissionRate: number) => {
+    const newExpanded = new Set(expandedOrders);
+    if (newExpanded.has(orderNum)) {
+      newExpanded.delete(orderNum);
+    } else {
+      newExpanded.add(orderNum);
+      // Load line items if not already loaded
+      if (!orderLineItems.has(orderNum)) {
+        await loadLineItems(orderNum, commissionRate);
+      }
+    }
+    setExpandedOrders(newExpanded);
+  };
+
+  const loadLineItems = async (orderNum: string, commissionRate: number) => {
+    try {
+      // Query fishbowl_soitems for this order
+      const itemsQuery = query(
+        collection(db, 'fishbowl_soitems'),
+        where('salesOrderNum', '==', orderNum)
+      );
+      
+      const itemsSnapshot = await getDocs(itemsQuery);
+      const items: OrderLineItem[] = [];
+      
+      itemsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        const lineTotal = (data.revenue || 0);
+        const commissionAmount = lineTotal * (commissionRate / 100);
+        
+        items.push({
+          id: doc.id,
+          orderNum: orderNum,
+          productNum: data.partNumber || data.productNum || '',
+          product: data.product || '',
+          description: data.description || data.productDesc || '',
+          quantity: data.quantity || 0,
+          unitPrice: data.unitPrice || 0,
+          lineTotal: lineTotal,
+          commissionAmount: commissionAmount,
+        });
+      });
+      
+      // Update the map
+      setOrderLineItems(prev => new Map(prev).set(orderNum, items));
+    } catch (error) {
+      console.error('Error loading line items:', error);
+      toast.error('Failed to load line items');
+    }
   };
 
   const loadReportData = async (userId: string, admin: boolean) => {
@@ -829,19 +894,69 @@ export default function ReportsPage() {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {customer.orders.map((order) => (
-                                      <tr key={order.id} className="border-t border-gray-100 hover:bg-gray-50">
-                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{order.orderNum}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-600">
-                                          {order.orderDate?.toDate?.().toLocaleDateString() || '-'}
-                                        </td>
-                                        <td className="px-4 py-3 text-sm text-right">{formatCurrency(order.orderRevenue)}</td>
-                                        <td className="px-4 py-3 text-sm text-right text-gray-600">{order.commissionRate.toFixed(2)}%</td>
-                                        <td className="px-4 py-3 text-sm text-right font-semibold text-green-600">
-                                          {formatCurrency(order.commissionAmount)}
-                                        </td>
-                                      </tr>
-                                    ))}
+                                  {customer.orders.map((order) => (
+  <React.Fragment key={order.id}>
+    <tr 
+      className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer"
+      onClick={() => toggleOrder(order.orderNum, order.commissionRate)}
+    >
+      <td className="px-4 py-3 text-sm font-medium text-gray-900">
+        <div className="flex items-center">
+          {expandedOrders.has(order.orderNum) ? (
+            <ChevronDown className="w-4 h-4 mr-2 text-gray-600" />
+          ) : (
+            <ChevronRight className="w-4 h-4 mr-2 text-gray-600" />
+          )}
+          {order.orderNum}
+        </div>
+      </td>
+      <td className="px-4 py-3 text-sm text-gray-600">
+        {order.orderDate?.toDate?.().toLocaleDateString() || '-'}
+      </td>
+      <td className="px-4 py-3 text-sm text-right">{formatCurrency(order.orderRevenue)}</td>
+      <td className="px-4 py-3 text-sm text-right text-gray-600">{order.commissionRate.toFixed(2)}%</td>
+      <td className="px-4 py-3 text-sm text-right font-semibold text-green-600">
+        {formatCurrency(order.commissionAmount)}
+      </td>
+    </tr>
+
+    {/* Line Items - Expanded */}
+    {expandedOrders.has(order.orderNum) && orderLineItems.has(order.orderNum) && (
+      <tr>
+        <td colSpan={5} className="px-0 py-0">
+          <div className="bg-gray-50 px-8 py-4">
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs text-gray-600">
+                  <th className="text-left pb-2">Product</th>
+                  <th className="text-left pb-2">Description</th>
+                  <th className="text-right pb-2">Qty</th>
+                  <th className="text-right pb-2">Unit Price</th>
+                  <th className="text-right pb-2">Line Total</th>
+                  <th className="text-right pb-2">Commission</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orderLineItems.get(order.orderNum)!.map((item) => (
+                  <tr key={item.id} className="text-sm border-t border-gray-200">
+                    <td className="py-2 font-medium text-gray-900">{item.productNum}</td>
+                    <td className="py-2 text-gray-600 text-xs">{item.description}</td>
+                    <td className="py-2 text-right">{item.quantity}</td>
+                    <td className="py-2 text-right">{formatCurrency(item.unitPrice)}</td>
+                    <td className="py-2 text-right font-medium">{formatCurrency(item.lineTotal)}</td>
+                    <td className="py-2 text-right text-green-600 font-semibold">
+                      {formatCurrency(item.commissionAmount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+    )}
+  </React.Fragment>
+))}
                                   </tbody>
                                 </table>
                               </div>
