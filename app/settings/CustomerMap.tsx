@@ -344,10 +344,17 @@ export default function CustomerMap() {
       let bVal = b[sortField];
       
       // Handle undefined values
-      if (aVal === undefined) aVal = '';
-      if (bVal === undefined) bVal = '';
+      if (aVal === undefined) aVal = sortField === 'totalSales' || sortField === 'orderCount' ? 0 : '';
+      if (bVal === undefined) bVal = sortField === 'totalSales' || sortField === 'orderCount' ? 0 : '';
       
-      // Convert to strings for comparison
+      // Numeric sorting for sales and order count
+      if (sortField === 'totalSales' || sortField === 'orderCount') {
+        const aNum = Number(aVal) || 0;
+        const bNum = Number(bVal) || 0;
+        return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
+      }
+      
+      // String sorting for everything else
       const aStr = String(aVal).toLowerCase();
       const bStr = String(bVal).toLowerCase();
       
