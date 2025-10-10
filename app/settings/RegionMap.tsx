@@ -150,10 +150,14 @@ export default function RegionMap() {
       });
       setStateStats(stats);
 
-      // Calculate region stats
+      // Calculate region stats - match customers to regions by state
       const regStats: { [key: string]: RegionStats } = {};
       REGIONS.forEach(region => {
-        const regionCustomers = customersData.filter(c => c.region === region.name);
+        // Match customers by state instead of region field
+        const regionCustomers = customersData.filter(c => 
+          region.states.includes(c.shippingState)
+        );
+        
         regStats[region.name] = {
           name: region.name,
           color: region.color,
@@ -235,7 +239,7 @@ export default function RegionMap() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium text-blue-900">Total Revenue</div>
+            <div className="text-sm font-medium text-blue-900">Total Revenue (All-Time)</div>
             <DollarSign className="w-5 h-5 text-blue-600" />
           </div>
           <div className="text-3xl font-bold text-blue-900">{formatCurrency(totalSales)}</div>
