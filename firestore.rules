@@ -93,6 +93,24 @@ service cloud.firestore {
       allow write: if true;
     }
     
+    // Regions collection (internal app - permissive)
+    match /regions/{regionId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Org chart collection (internal app - permissive)
+    match /org_chart/{chartId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Copper companies (internal app - permissive)
+    match /copper_companies/{companyId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
     // ========== EXISTING RULES (FROM YOUR CONSOLE) ==========
     
     // Products collection - public read, admin write

@@ -324,13 +324,33 @@ export default function RegionManager() {
                   >
                     <option value="">Unassigned</option>
                     {users
-                      .filter((u) => u.orgRole === 'regional' || u.orgRole === 'director')
+                      .filter((u) => u.name && u.salesPerson) // Show all users with name and salesPerson
+                      .sort((a, b) => {
+                        // Sort by orgRole priority, then by name
+                        const rolePriority: any = {
+                          'vp': 1,
+                          'director': 2,
+                          'regional': 3,
+                          'division': 4,
+                          'territory': 5,
+                          'rep': 6
+                        };
+                        const aPriority = rolePriority[a.orgRole || 'rep'] || 99;
+                        const bPriority = rolePriority[b.orgRole || 'rep'] || 99;
+                        if (aPriority !== bPriority) return aPriority - bPriority;
+                        return a.name.localeCompare(b.name);
+                      })
                       .map((user) => (
                         <option key={user.id} value={user.id}>
-                          {user.name} ({user.salesPerson})
+                          {user.name} ({user.salesPerson}) {user.orgRole ? `- ${user.orgRole}` : ''}
                         </option>
                       ))}
                   </select>
+                  {users.length === 0 && (
+                    <p className="text-sm text-yellow-600 mt-1">
+                      ⚠️ No users found. Make sure users are created in the Team Members tab.
+                    </p>
+                  )}
                 </div>
 
                 {/* State Selection */}
