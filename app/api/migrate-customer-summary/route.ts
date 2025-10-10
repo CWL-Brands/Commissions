@@ -18,6 +18,23 @@ export async function POST(request: NextRequest) {
     const ordersSnapshot = await adminDb.collection('fishbowl_sales_orders').get();
     console.log(`✅ Found ${ordersSnapshot.size} orders`);
 
+    // Load regions for state-to-region mapping
+    console.log('📦 Loading regions for state mapping...');
+    const regionsSnapshot = await adminDb.collection('regions').get();
+    const stateToRegionMap = new Map<string, { name: string; color: string }>();
+    regionsSnapshot.forEach((doc: any) => {
+      const data = doc.data();
+      if (data.states && Array.isArray(data.states)) {
+        data.states.forEach((state: string) => {
+          stateToRegionMap.set(state.toUpperCase(), {
+            name: data.name,
+            color: data.color || '#808080'
+          });
+        });
+      }
+    });
+    console.log(`✅ Loaded ${regionsSnapshot.size} regions with ${stateToRegionMap.size} state mappings`);
+
     // Load users for sales rep mapping
     console.log('📦 Loading users for sales rep mapping...');
     const usersSnapshot = await adminDb.collection('users').get();
@@ -141,6 +158,10 @@ export async function POST(request: NextRequest) {
         const salesPerson = customer.salesPerson || '';
         const repInfo = usersMap.get(salesPerson) || { name: salesPerson, region: '', email: '' };
 
+        // Determine region from state
+        const normalizedState = (customer.shippingState || '').trim().toUpperCase();
+        const regionInfo = stateToRegionMap.get(normalizedState) || { name: '', color: '#808080' };
+
         // Create summary document
         const summary = {
           customerId: customerId,
@@ -160,13 +181,14 @@ export async function POST(request: NextRequest) {
           orders_30d: orders_30d,
           orders_90d: orders_90d,
           orders_12m: orders_12m,
-          firstOrderDate: firstOrderDate ? firstOrderDate.toISOString().split('T')[0] : null,
-          lastOrderDate: lastOrderDate ? lastOrderDate.toISOString().split('T')[0] : null,
+          firstOrderDate: firstOrderDate ? (firstOrderDate as Date).toISOString().split('T')[0] : null,
+          lastOrderDate: lastOrderDate ? (lastOrderDate as Date).toISOString().split('T')[0] : null,
           lastOrderAmount: lastOrderAmount,
           avgOrderValue: avgOrderValue,
           salesPerson: salesPerson,
           salesPersonName: repInfo.name,
-          region: customer.region || repInfo.region || '',
+          region: regionInfo.name, // Determined from state mapping
+          regionColor: regionInfo.color, // Store color for fast display
           accountType: customer.accountType || '',
           shippingAddress: customer.shippingAddress || '',
           shippingCity: customer.shippingCity || '',
