@@ -36,6 +36,16 @@ interface CommissionDetail {
   notes: string;
 }
 
+interface OrderLineItem {
+  id: string;
+  productName: string;
+  productCode: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  category?: string;
+}
+
 export default function MonthlyReportsPage() {
   const router = useRouter();
   const { user, isAdmin, loading: authLoading } = useAuth();
@@ -45,6 +55,8 @@ export default function MonthlyReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState('');
   const [selectedRep, setSelectedRep] = useState('all');
   const [viewMode, setViewMode] = useState<'summary' | 'details'>('summary');
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [orderLineItems, setOrderLineItems] = useState<{ [orderNum: string]: OrderLineItem[] }>({});
 
   useEffect(() => {
     if (authLoading) return;
@@ -123,6 +135,43 @@ export default function MonthlyReportsPage() {
     }
   }, [selectedMonth]);
 
+  const loadOrderLineItems = async (orderNum: string) => {
+    if (orderLineItems[orderNum]) {
+      // Already loaded, just toggle
+      setExpandedOrder(expandedOrder === orderNum ? null : orderNum);
+      return;
+    }
+
+    try {
+      const itemsSnapshot = await getDocs(
+        query(
+          collection(db, 'fishbowl_soitems'),
+          where('orderNum', '==', orderNum)
+        )
+      );
+      
+      const items: OrderLineItem[] = [];
+      itemsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        items.push({
+          id: doc.id,
+          productName: data.productName || data.description || 'Unknown Product',
+          productCode: data.productCode || data.productNum || '',
+          quantity: Number(data.quantity) || 0,
+          unitPrice: Number(data.unitPrice) || Number(data.price) || 0,
+          lineTotal: Number(data.lineTotal) || Number(data.totalPrice) || 0,
+          category: data.category || ''
+        });
+      });
+
+      setOrderLineItems(prev => ({ ...prev, [orderNum]: items }));
+      setExpandedOrder(orderNum);
+    } catch (error) {
+      console.error('Error loading order line items:', error);
+      toast.error('Failed to load order details');
+    }
+  };
+
   const exportToCSV = () => {
     const filteredSummaries = selectedRep === 'all' 
       ? summaries.filter(s => s.month === selectedMonth)
@@ -169,8 +218,10 @@ export default function MonthlyReportsPage() {
     : details.filter(d => d.salesPerson === selectedRep);
 
   const uniqueMonths = Array.from(new Set(summaries.map(s => s.month))).sort().reverse();
-  const uniqueReps = Array.from(new Set(summaries.map(s => ({ name: s.repName, salesPerson: s.salesPerson }))));
-
+  // Fix duplicate keys by using Map to deduplicate by salesPerson
+  const uniqueReps = Array.from(
+    new Map(summaries.map(s => [s.salesPerson, { name: s.repName, salesPerson: s.salesPerson }])).values()
+  );
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -377,7 +428,10 @@ export default function MonthlyReportsPage() {
         {/* Details View */}
         {viewMode === 'details' && selectedMonth && (
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Detailed Commission Breakdown</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Detailed Commission Breakdown
+              <span className="text-sm font-normal text-gray-500 ml-2">(Click order to view line items)</span>
+            </h2>
             <div className="overflow-x-auto">
               <table className="table">
                 <thead>
@@ -394,30 +448,83 @@ export default function MonthlyReportsPage() {
                 </thead>
                 <tbody>
                   {filteredDetails.map((detail) => (
-                    <tr key={detail.id}>
-                      <td className="font-medium text-sm">{detail.repName}</td>
-                      <td className="text-sm text-gray-600">{detail.orderNum}</td>
-                      <td className="text-sm">{detail.customerName}</td>
-                      <td className="text-sm">
-                        <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
-                          {detail.customerSegment}
-                        </span>
-                      </td>
-                      <td className="text-sm">
-                        <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
-                          {detail.customerStatus}
-                        </span>
-                      </td>
-                      <td className="text-right text-sm">
-                        ${detail.orderRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="text-right text-sm text-gray-600">
-                        {detail.commissionRate.toFixed(2)}%
-                      </td>
-                      <td className="text-right text-sm font-semibold text-green-600">
-                        ${detail.commissionAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
+                    <>
+                      <tr 
+                        key={detail.id}
+                        onClick={() => loadOrderLineItems(detail.orderNum)}
+                        className="cursor-pointer hover:bg-gray-50 transition-colors"
+                      >
+                        <td className="font-medium text-sm">{detail.repName}</td>
+                        <td className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                          {detail.orderNum}
+                          {expandedOrder === detail.orderNum ? ' ▼' : ' ▶'}
+                        </td>
+                        <td className="text-sm">{detail.customerName}</td>
+                        <td className="text-sm">
+                          <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                            {detail.customerSegment}
+                          </span>
+                        </td>
+                        <td className="text-sm">
+                          <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
+                            {detail.customerStatus}
+                          </span>
+                        </td>
+                        <td className="text-right text-sm">
+                          ${detail.orderRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="text-right text-sm text-gray-600">
+                          {detail.commissionRate.toFixed(2)}%
+                        </td>
+                        <td className="text-right text-sm font-semibold text-green-600">
+                          ${detail.commissionAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                      {/* Expanded Line Items */}
+                      {expandedOrder === detail.orderNum && orderLineItems[detail.orderNum] && (
+                        <tr key={`${detail.id}-items`}>
+                          <td colSpan={8} className="bg-gray-50 p-4">
+                            <div className="ml-8">
+                              <h4 className="font-semibold text-gray-900 mb-2">Order Line Items</h4>
+                              <table className="min-w-full text-sm">
+                                <thead className="bg-gray-100">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left">Product Code</th>
+                                    <th className="px-3 py-2 text-left">Product Name</th>
+                                    <th className="px-3 py-2 text-right">Quantity</th>
+                                    <th className="px-3 py-2 text-right">Unit Price</th>
+                                    <th className="px-3 py-2 text-right">Line Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {orderLineItems[detail.orderNum].map((item) => (
+                                    <tr key={item.id} className="border-t border-gray-200">
+                                      <td className="px-3 py-2 text-gray-600">{item.productCode}</td>
+                                      <td className="px-3 py-2">{item.productName}</td>
+                                      <td className="px-3 py-2 text-right">{item.quantity}</td>
+                                      <td className="px-3 py-2 text-right">
+                                        ${item.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                      <td className="px-3 py-2 text-right font-medium">
+                                        ${item.lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot className="bg-gray-100 font-semibold">
+                                  <tr>
+                                    <td colSpan={4} className="px-3 py-2 text-right">Order Total:</td>
+                                    <td className="px-3 py-2 text-right">
+                                      ${orderLineItems[detail.orderNum].reduce((sum, item) => sum + item.lineTotal, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   ))}
                 </tbody>
               </table>
