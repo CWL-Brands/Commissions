@@ -1081,9 +1081,16 @@ export default function SettingsPage() {
       // For sales rep, we need to update both fishbowlUsername and salesPerson (display name)
       let repName = '';
       if (batchSalesRep) {
-        updates.fishbowlUsername = batchSalesRep;
-        repName = reps.find(r => r.salesPerson === batchSalesRep)?.name || batchSalesRep;
-        updates.salesPerson = repName;
+        if (batchSalesRep === 'UNASSIGNED') {
+          // Unassign the sales rep
+          updates.fishbowlUsername = '';
+          updates.salesPerson = 'Unassigned';
+        } else {
+          // Assign to a specific rep
+          updates.fishbowlUsername = batchSalesRep;
+          repName = reps.find(r => r.salesPerson === batchSalesRep)?.name || batchSalesRep;
+          updates.salesPerson = repName;
+        }
       }
 
       // Update in Firestore
@@ -2735,6 +2742,7 @@ export default function SettingsPage() {
                       className="input w-full"
                     >
                       <option value="">Don&apos;t Change</option>
+                      <option value="UNASSIGNED">⚠️ Unassigned (Remove Rep)</option>
                       {reps.filter(r => r.active).map(rep => (
                         <option key={rep.id} value={rep.salesPerson}>
                           {rep.name} ({rep.salesPerson})
