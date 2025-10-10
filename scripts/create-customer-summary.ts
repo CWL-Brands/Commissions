@@ -130,8 +130,8 @@ async function createCustomerSummaries() {
       let orders_30d = 0;
       let orders_90d = 0;
       let orders_12m = 0;
-      let firstOrderDate: Date | null = null;
-      let lastOrderDate: Date | null = null;
+      let firstOrderDate: Date | null = null as Date | null;
+      let lastOrderDate: Date | null = null as Date | null;
       let lastOrderAmount = 0;
 
       orders.forEach(order => {
