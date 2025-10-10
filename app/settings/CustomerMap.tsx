@@ -74,73 +74,42 @@ export default function CustomerMap() {
       });
       setRegions(regionsData);
 
-      // Load customers
-      const customersSnapshot = await getDocs(collection(db, 'fishbowl_customers'));
+      // Load customers from pre-aggregated summary collection
+      const summarySnapshot = await getDocs(collection(db, 'customer_sales_summary'));
       const customersData: Customer[] = [];
 
-      // Load sales orders for aggregation
-      const salesSnapshot = await getDocs(collection(db, 'fishbowl_sales_orders'));
-      const salesByCustomer = new Map<string, { total: number; count: number; lastDate: string }>();
-      
-      salesSnapshot.forEach((doc) => {
+      summarySnapshot.forEach((doc) => {
         const data = doc.data();
-        const customerId = String(data.customerId);
-        // Use revenue field (primary) or orderValue as fallback
-        const total = Number(data.revenue) || Number(data.orderValue) || 0;
-        const postingDateStr = data.postingDateStr || '';
-        
-        if (!salesByCustomer.has(customerId)) {
-          salesByCustomer.set(customerId, { total: 0, count: 0, lastDate: '' });
-        }
-        
-        const existing = salesByCustomer.get(customerId)!;
-        existing.total += total;
-        existing.count += 1;
-        
-        // Track most recent order date
-        if (!existing.lastDate || postingDateStr > existing.lastDate) {
-          existing.lastDate = postingDateStr;
-        }
-      });
 
-      customersSnapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.shippingState && data.shippingCity) {
-          // Find region for this state
-          const region = regionsData.find(r => 
-            r.states.includes(normalizeState(data.shippingState))
-          );
+        // Find region color
+        const customerRegion = regionsData.find(r => r.name === data.region);
+        const regionColor = customerRegion?.color || '#808080';
 
-          // Get sales data for this customer
-          const salesData = salesByCustomer.get(doc.id);
-
-          customersData.push({
-            id: doc.id,
-            name: data.name || 'Unknown',
-            shippingAddress: data.shippingAddress || '',
-            shippingCity: data.shippingCity || '',
-            shippingState: normalizeState(data.shippingState),
-            shippingZip: data.shipToZip || '',
-            salesPerson: data.salesPerson || 'Unassigned',
-            accountType: data.accountType || 'Retail',
-            lat: data.lat,
-            lng: data.lng,
-            region: region?.name,
-            regionColor: region?.color || '#6B7280',
-            totalSales: salesData?.total || 0,
-            orderCount: salesData?.count || 0,
-            lastOrderDate: salesData?.lastDate || ''
-          });
-        }
+        customersData.push({
+          id: data.customerId || doc.id,
+          name: data.customerName || '',
+          shippingAddress: data.shippingAddress || '',
+          shippingCity: data.shippingCity || '',
+          shippingState: data.shippingState || '',
+          shippingZip: data.shippingZip || '',
+          salesPerson: data.salesPerson || '',
+          accountType: data.accountType || '',
+          lat: data.lat || null,
+          lng: data.lng || null,
+          region: data.region || '',
+          regionColor: regionColor,
+          totalSales: data.totalSales || 0,
+          orderCount: data.orderCount || 0,
+          lastOrderDate: data.lastOrderDate || ''
+        });
       });
 
       setCustomers(customersData);
-      setLoading(false);
-      
-      // DON'T geocode immediately - wait for maps to load
-      // Geocoding will be triggered after map loads
+      console.log(`✅ Loaded ${customersData.length} customers from summary collection`);
     } catch (error) {
       console.error('Error loading data:', error);
+      toast.error('Failed to load customer data');
+    } finally {
       setLoading(false);
     }
   }, []);

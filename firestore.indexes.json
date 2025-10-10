@@ -201,6 +201,90 @@
         }
       ],
       "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "customer_sales_summary",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "salesPerson",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "totalSales",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "customer_sales_summary",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "region",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "totalSales",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "customer_sales_summary",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastOrderDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "fishbowl_sales_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "customerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "postingDateStr",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "fishbowl_sales_orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "salesPerson",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "postingDateStr",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "fishbowl_soitems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "salesOrderNum",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lineItemId",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
