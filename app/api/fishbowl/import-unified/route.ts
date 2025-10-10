@@ -105,6 +105,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           accountNumber: row['Account Number'] || '',  // Customer Account Number in Fishbowl
           // PRESERVE existing accountType if it exists, otherwise use Fishbowl value
           accountType: existingData?.accountType || row['Account Type'] || '',
+          // PRESERVE manual sales rep assignment (fishbowlUsername) - don't overwrite with import
+          fishbowlUsername: existingData?.fishbowlUsername || '',
           companyId: row['Company id'] || '',
           companyName: row['Company name'] || '',
           parentCompanyId: row['Parent Company ID'] || '',

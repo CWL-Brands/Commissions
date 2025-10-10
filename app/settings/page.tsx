@@ -1010,12 +1010,15 @@ export default function SettingsPage() {
     setSavingCustomer(customerId);
     try {
       const customerRef = doc(db, 'fishbowl_customers', customerId);
+      const repName = reps.find(r => r.salesPerson === newFishbowlUsername)?.name || newFishbowlUsername || 'Unassigned';
+      
+      // Update both fishbowlUsername (manual assignment) and salesPerson (display name)
       await updateDoc(customerRef, {
-        salesPerson: newFishbowlUsername
+        fishbowlUsername: newFishbowlUsername,  // This is the manual override
+        salesPerson: repName  // Display name for UI
       });
       
       // Update local state
-      const repName = reps.find(r => r.salesPerson === newFishbowlUsername)?.name || newFishbowlUsername || 'Unassigned';
       setCustomers(prev => prev.map(c => 
         c.id === customerId ? { ...c, salesPerson: repName, fishbowlUsername: newFishbowlUsername } : c
       ));
