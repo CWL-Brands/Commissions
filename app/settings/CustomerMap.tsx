@@ -48,6 +48,7 @@ export default function CustomerMap() {
   const [mapsLoaded, setMapsLoaded] = useState(false);
   const [geocodingErrors, setGeocodingErrors] = useState<Array<{ customer: string; address: string; error: string }>>([]);
   const [showErrorReport, setShowErrorReport] = useState(false);
+  const [hasAutoGeocoded, setHasAutoGeocoded] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -211,18 +212,19 @@ export default function CustomerMap() {
     setMap(null);
   }, []);
 
-  // Trigger geocoding after maps loads and we have customers
+  // Trigger geocoding after maps loads and we have customers (only once)
   useEffect(() => {
-    if (mapsLoaded && customers.length > 0 && !loading) {
+    if (mapsLoaded && customers.length > 0 && !loading && !hasAutoGeocoded) {
       const needsGeocoding = customers.filter(c => !c.lat || !c.lng);
       if (needsGeocoding.length > 0 && needsGeocoding.length < 100) {
         // Only auto-geocode if less than 100 to avoid rate limits
         console.log(`Auto-geocoding ${needsGeocoding.length} customers...`);
+        setHasAutoGeocoded(true); // Prevent re-triggering
         setGeocodingProgress({ current: 0, total: needsGeocoding.length });
         geocodeCustomers(needsGeocoding);
       }
     }
-  }, [mapsLoaded, customers, loading]);
+  }, [mapsLoaded, customers, loading, hasAutoGeocoded]);
 
   const handleManualGeocode = async () => {
     if (!mapsLoaded) {
