@@ -1077,7 +1077,14 @@ export default function SettingsPage() {
     try {
       const updates: any = {};
       if (batchAccountType) updates.accountType = batchAccountType;
-      if (batchSalesRep) updates.salesPerson = batchSalesRep;
+      
+      // For sales rep, we need to update both fishbowlUsername and salesPerson (display name)
+      let repName = '';
+      if (batchSalesRep) {
+        updates.fishbowlUsername = batchSalesRep;
+        repName = reps.find(r => r.salesPerson === batchSalesRep)?.name || batchSalesRep;
+        updates.salesPerson = repName;
+      }
 
       // Update in Firestore
       const promises = Array.from(selectedCustomers).map(customerId => {
