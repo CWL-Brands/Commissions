@@ -52,34 +52,6 @@ interface RegionStats {
   topCustomers: CustomerSummary[];
 }
 
-const REGIONS: RegionConfig[] = [
-  {
-    name: 'West',
-    color: '#3B82F6', // blue
-    states: ['WA', 'OR', 'CA', 'NV', 'ID', 'MT', 'WY', 'AK', 'HI']
-  },
-  {
-    name: 'Central',
-    color: '#10B981', // green
-    states: ['ND', 'SD', 'NE', 'KS', 'MN', 'IA', 'MO', 'WI', 'IL', 'IN', 'MI', 'OH']
-  },
-  {
-    name: 'East',
-    color: '#8B5CF6', // purple
-    states: ['ME', 'NH', 'VT', 'MA', 'RI', 'CT', 'NY', 'NJ', 'PA', 'DE', 'MD', 'DC', 'WV', 'VA']
-  },
-  {
-    name: 'South East',
-    color: '#F59E0B', // amber
-    states: ['KY', 'TN', 'NC', 'SC', 'GA', 'FL', 'AL', 'MS', 'LA', 'AR']
-  },
-  {
-    name: 'South West',
-    color: '#EF4444', // red
-    states: ['TX', 'OK', 'NM', 'AZ', 'CO', 'UT']
-  }
-];
-
 // State abbreviation to full name mapping
 const STATE_NAMES: { [key: string]: string } = {
   'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
@@ -97,6 +69,7 @@ const STATE_NAMES: { [key: string]: string } = {
 
 export default function RegionMap() {
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [regions, setRegions] = useState<RegionConfig[]>([]);
   const [regionStats, setRegionStats] = useState<{ [key: string]: RegionStats }>({});
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
@@ -104,6 +77,20 @@ export default function RegionMap() {
 
   const loadCustomers = useCallback(async () => {
     try {
+      console.log('Loading regions from Firestore...');
+      const regionsSnapshot = await getDocs(collection(db, 'regions'));
+      const regionsData: RegionConfig[] = [];
+      regionsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        regionsData.push({
+          name: data.name || '',
+          color: data.color || '#808080',
+          states: data.states || []
+        });
+      });
+      console.log(`Loaded ${regionsData.length} regions`);
+      setRegions(regionsData);
+
       console.log('Loading customer summaries...');
       const snapshot = await getDocs(collection(db, 'customer_sales_summary'));
       const customersData: CustomerSummary[] = [];
@@ -152,7 +139,7 @@ export default function RegionMap() {
 
       // Calculate region stats - match customers to regions by state
       const regStats: { [key: string]: RegionStats } = {};
-      REGIONS.forEach(region => {
+      regionsData.forEach((region: RegionConfig) => {
         // Match customers by state instead of region field
         const regionCustomers = customersData.filter(c => 
           region.states.includes(c.shippingState)
@@ -204,7 +191,7 @@ export default function RegionMap() {
   };
 
   const getRegionForState = (state: string): RegionConfig | undefined => {
-    return REGIONS.find(r => r.states.includes(state));
+    return regions.find((r: RegionConfig) => r.states.includes(state));
   };
 
   const formatCurrency = (value: number) => {
@@ -383,12 +370,12 @@ export default function RegionMap() {
           {Object.entries(stateStats)
             .filter(([state]) => {
               if (!selectedRegion) return true;
-              const region = REGIONS.find(r => r.name === selectedRegion);
+              const region = regions.find((r: RegionConfig) => r.name === selectedRegion);
               return region?.states.includes(state);
             })
             .sort((a, b) => b[1].count - a[1].count)
             .map(([state, stats]) => {
-              const region = REGIONS.find(r => r.states.includes(state));
+              const region = regions.find((r: RegionConfig) => r.states.includes(state));
               if (!region) return null;
 
               return (
