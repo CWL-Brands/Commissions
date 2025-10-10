@@ -104,9 +104,25 @@ export default function CustomerMap() {
     loadData();
   }, [loadData]);
 
+  const stateNameToAbbr: { [key: string]: string } = {
+    'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR', 'CALIFORNIA': 'CA',
+    'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE', 'FLORIDA': 'FL', 'GEORGIA': 'GA',
+    'HAWAII': 'HI', 'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA',
+    'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
+    'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS', 'MISSOURI': 'MO',
+    'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ',
+    'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH',
+    'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
+    'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT', 'VERMONT': 'VT',
+    'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY'
+  };
+
   const normalizeState = (state: string): string => {
     const normalized = state.trim().toUpperCase();
-    return normalized.length === 2 ? normalized : normalized.slice(0, 2);
+    // If already 2 characters, return as-is
+    if (normalized.length === 2) return normalized;
+    // Look up full state name
+    return stateNameToAbbr[normalized] || normalized.slice(0, 2);
   };
 
   const geocodeCustomers = async (customersToGeocode: Customer[]) => {
@@ -124,7 +140,8 @@ export default function CustomerMap() {
         
         await Promise.all(
           batch.map(async (customer) => {
-            const address = `${customer.shippingAddress}, ${customer.shippingCity}, ${customer.shippingState} ${customer.shippingZip}`;
+            const stateAbbr = normalizeState(customer.shippingState);
+            const address = `${customer.shippingAddress}, ${customer.shippingCity}, ${stateAbbr} ${customer.shippingZip}`;
             try {
               const result = await geocoder.geocode({ address });
               
