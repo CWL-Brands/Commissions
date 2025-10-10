@@ -23,10 +23,10 @@ service cloud.firestore {
     
     // ========== COMMISSION CALCULATOR COLLECTIONS ==========
     
-    // Users collection
+    // Users collection (internal app - permissive for authenticated users)
     match /users/{userId} {
-      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
-      allow write: if isAdmin() || isEmulator();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated(); // Allow any authenticated user to manage team
     }
     
     // Settings collection (internal app - permissive)
