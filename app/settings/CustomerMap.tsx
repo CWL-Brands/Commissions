@@ -44,6 +44,7 @@ export default function CustomerMap() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [geocodingProgress, setGeocodingProgress] = useState({ current: 0, total: 0 });
+  const [mapsLoaded, setMapsLoaded] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -85,16 +86,10 @@ export default function CustomerMap() {
       });
 
       setCustomers(customersData);
-      
-      // Geocode customers that don't have coordinates
-      const needsGeocoding = customersData.filter(c => !c.lat || !c.lng);
-      if (needsGeocoding.length > 0) {
-        console.log(`Geocoding ${needsGeocoding.length} customers...`);
-        setGeocodingProgress({ current: 0, total: needsGeocoding.length });
-        await geocodeCustomers(needsGeocoding);
-      }
-
       setLoading(false);
+      
+      // DON'T geocode immediately - wait for maps to load
+      // Geocoding will be triggered after map loads
     } catch (error) {
       console.error('Error loading data:', error);
       setLoading(false);
@@ -156,11 +151,42 @@ export default function CustomerMap() {
 
   const onLoad = useCallback((map: google.maps.Map) => {
     setMap(map);
+    setMapsLoaded(true);
   }, []);
 
   const onUnmount = useCallback(() => {
     setMap(null);
   }, []);
+
+  // Trigger geocoding after maps loads and we have customers
+  useEffect(() => {
+    if (mapsLoaded && customers.length > 0 && !loading) {
+      const needsGeocoding = customers.filter(c => !c.lat || !c.lng);
+      if (needsGeocoding.length > 0 && needsGeocoding.length < 100) {
+        // Only auto-geocode if less than 100 to avoid rate limits
+        console.log(`Auto-geocoding ${needsGeocoding.length} customers...`);
+        setGeocodingProgress({ current: 0, total: needsGeocoding.length });
+        geocodeCustomers(needsGeocoding);
+      }
+    }
+  }, [mapsLoaded, customers, loading]);
+
+  const handleManualGeocode = async () => {
+    if (!mapsLoaded) {
+      alert('Please wait for Google Maps to load first');
+      return;
+    }
+    const needsGeocoding = customers.filter(c => !c.lat || !c.lng);
+    if (needsGeocoding.length === 0) {
+      alert('All customers already have coordinates!');
+      return;
+    }
+    if (!confirm(`Geocode ${needsGeocoding.length} customers? This may take a few minutes.`)) {
+      return;
+    }
+    setGeocodingProgress({ current: 0, total: needsGeocoding.length });
+    await geocodeCustomers(needsGeocoding);
+  };
 
   if (loading) {
     return (
@@ -206,7 +232,20 @@ export default function CustomerMap() {
 
       {/* Map */}
       <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">📍 Customer Locations</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">📍 Customer Locations</h3>
+          {customers.filter(c => !c.lat || !c.lng).length > 0 && (
+            <button
+              onClick={handleManualGeocode}
+              disabled={!mapsLoaded || geocodingProgress.total > 0}
+              className="btn btn-primary text-sm"
+            >
+              {geocodingProgress.total > 0
+                ? `Geocoding... ${geocodingProgress.current}/${geocodingProgress.total}`
+                : `🗺️ Geocode ${customers.filter(c => !c.lat || !c.lng).length} Customers`}
+            </button>
+          )}
+        </div>
         
         {/* Legend */}
         <div className="flex flex-wrap gap-3 mb-4">
