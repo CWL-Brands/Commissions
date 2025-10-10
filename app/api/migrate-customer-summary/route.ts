@@ -1,10 +1,32 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-export async function POST(request: NextRequest) {
+// State name to abbreviation mapping
+const stateNameToAbbr: { [key: string]: string } = {
+  'ALABAMA': 'AL', 'ALASKA': 'AK', 'ARIZONA': 'AZ', 'ARKANSAS': 'AR', 'CALIFORNIA': 'CA',
+  'COLORADO': 'CO', 'CONNECTICUT': 'CT', 'DELAWARE': 'DE', 'FLORIDA': 'FL', 'GEORGIA': 'GA',
+  'HAWAII': 'HI', 'IDAHO': 'ID', 'ILLINOIS': 'IL', 'INDIANA': 'IN', 'IOWA': 'IA',
+  'KANSAS': 'KS', 'KENTUCKY': 'KY', 'LOUISIANA': 'LA', 'MAINE': 'ME', 'MARYLAND': 'MD',
+  'MASSACHUSETTS': 'MA', 'MICHIGAN': 'MI', 'MINNESOTA': 'MN', 'MISSISSIPPI': 'MS', 'MISSOURI': 'MO',
+  'MONTANA': 'MT', 'NEBRASKA': 'NE', 'NEVADA': 'NV', 'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ',
+  'NEW MEXICO': 'NM', 'NEW YORK': 'NY', 'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', 'OHIO': 'OH',
+  'OKLAHOMA': 'OK', 'OREGON': 'OR', 'PENNSYLVANIA': 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC',
+  'SOUTH DAKOTA': 'SD', 'TENNESSEE': 'TN', 'TEXAS': 'TX', 'UTAH': 'UT', 'VERMONT': 'VT',
+  'VIRGINIA': 'VA', 'WASHINGTON': 'WA', 'WEST VIRGINIA': 'WV', 'WISCONSIN': 'WI', 'WYOMING': 'WY'
+};
+
+function normalizeState(state: string): string {
+  const normalized = state.trim().toUpperCase();
+  // If already 2 characters, return as-is
+  if (normalized.length === 2) return normalized;
+  // Look up full state name
+  return stateNameToAbbr[normalized] || normalized.slice(0, 2);
+}
+
+export async function POST(request: Request) {
   try {
     console.log('🚀 Starting customer_sales_summary migration...');
 
@@ -43,8 +65,10 @@ export async function POST(request: NextRequest) {
       const data = doc.data();
       if (data.salesPerson) {
         usersMap.set(data.salesPerson, {
+          id: doc.id,
           name: data.name,
           region: data.region || '',
+          regionalTerritory: data.regionalTerritory || '',
           email: data.email || ''
         });
       }
@@ -156,11 +180,11 @@ export async function POST(request: NextRequest) {
 
         // Get sales rep info
         const salesPerson = customer.salesPerson || '';
-        const repInfo = usersMap.get(salesPerson) || { name: salesPerson, region: '', email: '' };
+        const repInfo = usersMap.get(salesPerson) || { id: '', name: salesPerson, region: '', regionalTerritory: '', email: '' };
 
-        // Determine region from state
-        const normalizedState = (customer.shippingState || '').trim().toUpperCase();
-        const regionInfo = stateToRegionMap.get(normalizedState) || { name: '', color: '#808080' };
+        // Determine region from state (normalize full state names to abbreviations)
+        const stateAbbr = normalizeState(customer.shippingState || '');
+        const regionInfo = stateToRegionMap.get(stateAbbr) || { name: '', color: '#808080' };
 
         // Create summary document
         const summary = {
@@ -187,6 +211,9 @@ export async function POST(request: NextRequest) {
           avgOrderValue: avgOrderValue,
           salesPerson: salesPerson,
           salesPersonName: repInfo.name,
+          salesPersonId: repInfo.id, // User document ID
+          salesPersonRegion: repInfo.region, // User's assigned region
+          salesPersonTerritory: repInfo.regionalTerritory, // User's territory
           region: regionInfo.name, // Determined from state mapping
           regionColor: regionInfo.color, // Store color for fast display
           accountType: customer.accountType || '',
