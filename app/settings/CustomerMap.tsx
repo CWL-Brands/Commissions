@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { GoogleMap, LoadScript, Marker, InfoWindow } from '@react-google-maps/api';
+import { Search, Download, ChevronUp, ChevronDown } from 'lucide-react';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import toast from 'react-hot-toast';
@@ -52,6 +53,16 @@ export default function CustomerMap() {
   const [geocodingErrors, setGeocodingErrors] = useState<Array<{ customer: string; address: string; error: string }>>([]);
   const [showErrorReport, setShowErrorReport] = useState(false);
   const [hasAutoGeocoded, setHasAutoGeocoded] = useState(false);
+  
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedRegionFilter, setSelectedRegionFilter] = useState<string>('all');
+  const [selectedRepFilter, setSelectedRepFilter] = useState<string>('all');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [sortField, setSortField] = useState<keyof Customer>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const itemsPerPage = 50;
 
   const loadData = useCallback(async () => {
     try {
@@ -295,6 +306,129 @@ export default function CustomerMap() {
     await geocodeCustomers(needsGeocoding);
   };
 
+  // Filtered and sorted customers
+  const filteredCustomers = useMemo(() => {
+    let filtered = customers.filter(customer => {
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesSearch = 
+          customer.name.toLowerCase().includes(query) ||
+          customer.shippingCity.toLowerCase().includes(query) ||
+          customer.shippingState.toLowerCase().includes(query) ||
+          customer.salesPerson.toLowerCase().includes(query);
+        if (!matchesSearch) return false;
+      }
+      
+      // Region filter
+      if (selectedRegionFilter !== 'all' && customer.region !== selectedRegionFilter) {
+        return false;
+      }
+      
+      // Sales rep filter
+      if (selectedRepFilter !== 'all' && customer.salesPerson !== selectedRepFilter) {
+        return false;
+      }
+      
+      // Account type filter
+      if (selectedTypeFilter !== 'all' && customer.accountType !== selectedTypeFilter) {
+        return false;
+      }
+      
+      return true;
+    });
+
+    // Sort
+    filtered.sort((a, b) => {
+      let aVal = a[sortField];
+      let bVal = b[sortField];
+      
+      // Handle undefined values
+      if (aVal === undefined) aVal = '';
+      if (bVal === undefined) bVal = '';
+      
+      // Convert to strings for comparison
+      const aStr = String(aVal).toLowerCase();
+      const bStr = String(bVal).toLowerCase();
+      
+      if (sortDirection === 'asc') {
+        return aStr < bStr ? -1 : aStr > bStr ? 1 : 0;
+      } else {
+        return aStr > bStr ? -1 : aStr < bStr ? 1 : 0;
+      }
+    });
+
+    return filtered;
+  }, [customers, searchQuery, selectedRegionFilter, selectedRepFilter, selectedTypeFilter, sortField, sortDirection]);
+
+  // Get unique values for filters
+  const uniqueReps = useMemo(() => {
+    const reps = new Set(customers.map(c => c.salesPerson));
+    return Array.from(reps).sort();
+  }, [customers]);
+  
+  const uniqueTypes = useMemo(() => {
+    const types = new Set(customers.map(c => c.accountType));
+    return Array.from(types).sort();
+  }, [customers]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+  const paginatedCustomers = filteredCustomers.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  // Handle row click
+  const handleCustomerRowClick = (customer: Customer) => {
+    if (customer.lat && customer.lng && map) {
+      setSelectedCustomer(customer);
+      map.panTo({ lat: customer.lat, lng: customer.lng });
+      map.setZoom(12);
+    } else {
+      toast.error('This customer has not been geocoded yet');
+    }
+  };
+
+  // Handle sort
+  const handleSort = (field: keyof Customer) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Export to CSV
+  const handleExport = () => {
+    const csv = [
+      ['Name', 'Address', 'City', 'State', 'Zip', 'Region', 'Sales Rep', 'Type', 'Total Sales', 'Orders', 'Last Order'],
+      ...filteredCustomers.map(c => [
+        c.name,
+        c.shippingAddress,
+        c.shippingCity,
+        c.shippingState,
+        c.shippingZip,
+        c.region || 'Unassigned',
+        c.salesPerson,
+        c.accountType,
+        c.totalSales?.toFixed(2) || '0.00',
+        c.orderCount || '0',
+        c.lastOrderDate || ''
+      ])
+    ].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customers_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    toast.success(`✅ Exported ${filteredCustomers.length} customers to CSV!`);
+  };
+
   if (loading) {
     return (
       <div className="card">
@@ -311,10 +445,113 @@ export default function CustomerMap() {
     );
   }
 
-  const customersWithCoords = customers.filter(c => c.lat && c.lng);
+  const customersWithCoords = filteredCustomers.filter(c => c.lat && c.lng);
 
   return (
     <div className="space-y-4">
+      {/* Filter Controls */}
+      <div className="card">
+        <div className="flex flex-col md:flex-row gap-4">
+          {/* Search */}
+          <div className="flex-1">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search by name, city, state, or rep..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="input pl-10 w-full"
+              />
+            </div>
+          </div>
+
+          {/* Region Filter */}
+          <div className="w-full md:w-48">
+            <select
+              value={selectedRegionFilter}
+              onChange={(e) => {
+                setSelectedRegionFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="input w-full"
+            >
+              <option value="all">All Regions</option>
+              {regions.map(region => (
+                <option key={region.id} value={region.name}>{region.name}</option>
+              ))}
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+
+          {/* Sales Rep Filter */}
+          <div className="w-full md:w-48">
+            <select
+              value={selectedRepFilter}
+              onChange={(e) => {
+                setSelectedRepFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="input w-full"
+            >
+              <option value="all">All Sales Reps</option>
+              {uniqueReps.map(rep => (
+                <option key={rep} value={rep}>{rep}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Type Filter */}
+          <div className="w-full md:w-40">
+            <select
+              value={selectedTypeFilter}
+              onChange={(e) => {
+                setSelectedTypeFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="input w-full"
+            >
+              <option value="all">All Types</option>
+              {uniqueTypes.map(type => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Export Button */}
+          <button
+            onClick={handleExport}
+            className="btn btn-secondary whitespace-nowrap"
+            title="Export filtered customers to CSV"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </button>
+        </div>
+
+        {/* Active Filters Summary */}
+        {(searchQuery || selectedRegionFilter !== 'all' || selectedRepFilter !== 'all' || selectedTypeFilter !== 'all') && (
+          <div className="mt-3 flex items-center gap-2 text-sm text-gray-600">
+            <span className="font-medium">Showing {filteredCustomers.length} of {customers.length} customers</span>
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedRegionFilter('all');
+                setSelectedRepFilter('all');
+                setSelectedTypeFilter('all');
+                setCurrentPage(1);
+              }}
+              className="text-primary-600 hover:text-primary-700 underline"
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card bg-blue-50">
@@ -561,6 +798,202 @@ export default function CustomerMap() {
           </div>
         </div>
       )}
+
+      {/* Customer Table */}
+      <div className="card">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">📋 Customer List</h3>
+        
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th
+                  onClick={() => handleSort('name')}
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  <div className="flex items-center gap-1">
+                    Name
+                    {sortField === 'name' && (
+                      sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                    )}
+                  </div>
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Address
+                </th>
+                <th
+                  onClick={() => handleSort('shippingCity')}
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  <div className="flex items-center gap-1">
+                    City, State
+                    {sortField === 'shippingCity' && (
+                      sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('region')}
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  <div className="flex items-center gap-1">
+                    Region
+                    {sortField === 'region' && (
+                      sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('salesPerson')}
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  <div className="flex items-center gap-1">
+                    Sales Rep
+                    {sortField === 'salesPerson' && (
+                      sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('accountType')}
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  <div className="flex items-center gap-1">
+                    Type
+                    {sortField === 'accountType' && (
+                      sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('totalSales')}
+                  className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Total Sales
+                    {sortField === 'totalSales' && (
+                      sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('orderCount')}
+                  className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Orders
+                    {sortField === 'orderCount' && (
+                      sortDirection === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                    )}
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {paginatedCustomers.map((customer) => (
+                <tr
+                  key={customer.id}
+                  onClick={() => handleCustomerRowClick(customer)}
+                  className="hover:bg-gray-50 cursor-pointer transition-colors"
+                >
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <div
+                        className="w-3 h-3 rounded-full mr-2"
+                        style={{ backgroundColor: customer.regionColor }}
+                      />
+                      <div className="text-sm font-medium text-gray-900">{customer.name}</div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {customer.shippingAddress}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                    {customer.shippingCity}, {customer.shippingState}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                    {customer.region || <span className="text-gray-400">Unassigned</span>}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                    {customer.salesPerson}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span
+                      className={`px-2 py-1 text-xs rounded-full ${
+                        customer.accountType === 'Retail'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : customer.accountType === 'Wholesale'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-green-100 text-green-800'
+                      }`}
+                    >
+                      {customer.accountType}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium text-green-700">
+                    ${customer.totalSales?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-600">
+                    {customer.orderCount || 0}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-4">
+            <div className="text-sm text-gray-600">
+              Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredCustomers.length)} of {filteredCustomers.length} customers
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className="btn btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`px-3 py-1 text-sm rounded ${
+                        currentPage === pageNum
+                          ? 'bg-primary-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage === totalPages}
+                className="btn btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
