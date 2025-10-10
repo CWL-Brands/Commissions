@@ -19,6 +19,9 @@ interface Customer {
   lng?: number;
   region?: string;
   regionColor?: string;
+  totalSales?: number;
+  orderCount?: number;
+  lastOrderDate?: string;
 }
 
 interface Region {
@@ -64,6 +67,30 @@ export default function CustomerMap() {
       const customersSnapshot = await getDocs(collection(db, 'fishbowl_customers'));
       const customersData: Customer[] = [];
 
+      // Load sales orders for aggregation
+      const salesSnapshot = await getDocs(collection(db, 'fishbowl_sales_orders'));
+      const salesByCustomer = new Map<string, { total: number; count: number; lastDate: string }>();
+      
+      salesSnapshot.forEach((doc) => {
+        const data = doc.data();
+        const customerId = String(data.customerId);
+        const total = Number(data.totalPrice) || 0;
+        const dateIssued = data.dateIssued;
+        
+        if (!salesByCustomer.has(customerId)) {
+          salesByCustomer.set(customerId, { total: 0, count: 0, lastDate: '' });
+        }
+        
+        const existing = salesByCustomer.get(customerId)!;
+        existing.total += total;
+        existing.count += 1;
+        
+        // Track most recent order date
+        if (!existing.lastDate || dateIssued > existing.lastDate) {
+          existing.lastDate = dateIssued;
+        }
+      });
+
       customersSnapshot.forEach((doc) => {
         const data = doc.data();
         if (data.shippingState && data.shippingCity) {
@@ -71,6 +98,9 @@ export default function CustomerMap() {
           const region = regionsData.find(r => 
             r.states.includes(normalizeState(data.shippingState))
           );
+
+          // Get sales data for this customer
+          const salesData = salesByCustomer.get(doc.id);
 
           customersData.push({
             id: doc.id,
@@ -84,7 +114,10 @@ export default function CustomerMap() {
             lat: data.lat,
             lng: data.lng,
             region: region?.name,
-            regionColor: region?.color || '#6B7280'
+            regionColor: region?.color || '#6B7280',
+            totalSales: salesData?.total || 0,
+            orderCount: salesData?.count || 0,
+            lastOrderDate: salesData?.lastDate || ''
           });
         }
       });
@@ -373,16 +406,20 @@ export default function CustomerMap() {
                 position={{ lat: selectedCustomer.lat, lng: selectedCustomer.lng }}
                 onCloseClick={() => setSelectedCustomer(null)}
               >
-                <div className="p-2">
+                <div className="p-2 min-w-[280px]">
                   <h4 className="font-semibold text-gray-900 mb-2">
                     {selectedCustomer.name}
                   </h4>
                   <div className="space-y-1 text-sm text-gray-600">
                     <div>
                       <span className="font-medium">Address:</span>{' '}
-                      {selectedCustomer.shippingCity}, {selectedCustomer.shippingState}
+                      {selectedCustomer.shippingAddress}
                     </div>
                     <div>
+                      <span className="font-medium">City, State:</span>{' '}
+                      {selectedCustomer.shippingCity}, {normalizeState(selectedCustomer.shippingState)} {selectedCustomer.shippingZip}
+                    </div>
+                    <div className="border-t border-gray-200 pt-1 mt-1">
                       <span className="font-medium">Region:</span>{' '}
                       {selectedCustomer.region || 'Unassigned'}
                     </div>
@@ -404,6 +441,26 @@ export default function CustomerMap() {
                         {selectedCustomer.accountType}
                       </span>
                     </div>
+                    {selectedCustomer.orderCount && selectedCustomer.orderCount > 0 && (
+                      <>
+                        <div className="border-t border-gray-200 pt-1 mt-1">
+                          <span className="font-medium">Total Sales:</span>{' '}
+                          <span className="text-green-700 font-semibold">
+                            ${selectedCustomer.totalSales?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-medium">Orders:</span>{' '}
+                          {selectedCustomer.orderCount}
+                        </div>
+                        {selectedCustomer.lastOrderDate && (
+                          <div>
+                            <span className="font-medium">Last Order:</span>{' '}
+                            {new Date(selectedCustomer.lastOrderDate).toLocaleDateString()}
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               </InfoWindow>
