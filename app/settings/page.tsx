@@ -30,6 +30,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import RegionMap from './RegionMap';
+import RegionManager from './RegionManager';
+import CustomerMap from './CustomerMap';
 import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole, CommissionEntry } from '@/types';
 import { validateWeightsSum, calculatePayout, formatCurrency, formatAttainment } from '@/lib/commission/calculator';
 import MonthYearModal from '@/components/MonthYearModal';
@@ -105,7 +107,7 @@ export default function SettingsPage() {
   const [selectedOrgLevel, setSelectedOrgLevel] = useState<'all' | 'vp' | 'director' | 'regional' | 'division' | 'territory' | 'rep'>('all');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
-  const [orgChartSubTab, setOrgChartSubTab] = useState<'team' | 'regions'>('team');
+  const [orgChartSubTab, setOrgChartSubTab] = useState<'team' | 'regions' | 'regionManager' | 'map'>('team');
 
   // Database state
   const [entries, setEntries] = useState<CommissionEntry[]>([]);
@@ -3201,6 +3203,28 @@ export default function SettingsPage() {
                     Team Members
                   </button>
                   <button
+                    onClick={() => setOrgChartSubTab('regionManager')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      orgChartSubTab === 'regionManager'
+                        ? 'border-primary-500 text-primary-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <SettingsIcon className="w-4 h-4 inline mr-2" />
+                    Manage Regions
+                  </button>
+                  <button
+                    onClick={() => setOrgChartSubTab('map')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      orgChartSubTab === 'map'
+                        ? 'border-primary-500 text-primary-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <MapIcon className="w-4 h-4 inline mr-2" />
+                    Customer Map
+                  </button>
+                  <button
                     onClick={() => setOrgChartSubTab('regions')}
                     className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
                       orgChartSubTab === 'regions'
@@ -3208,8 +3232,8 @@ export default function SettingsPage() {
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                     }`}
                   >
-                    <MapIcon className="w-4 h-4 inline mr-2" />
-                    Regional Map
+                    <DatabaseIcon className="w-4 h-4 inline mr-2" />
+                    Region Stats
                   </button>
                 </nav>
               </div>
@@ -3235,7 +3259,17 @@ export default function SettingsPage() {
               )}
             </div>
 
-            {/* Regional Map Sub-Tab */}
+            {/* Region Manager Sub-Tab */}
+            {orgChartSubTab === 'regionManager' && (
+              <RegionManager />
+            )}
+
+            {/* Customer Map Sub-Tab */}
+            {orgChartSubTab === 'map' && (
+              <CustomerMap />
+            )}
+
+            {/* Regional Stats Sub-Tab */}
             {orgChartSubTab === 'regions' && (
               <RegionMap />
             )}

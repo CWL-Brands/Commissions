@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@dataconnect/generated": "file:src/dataconnect-generated",
+    "@react-google-maps/api": "^2.20.7",
     "bfg": "^0.3.0",
     "copper-sdk": "^0.9.1",
     "date-fns": "^2.30.0",
