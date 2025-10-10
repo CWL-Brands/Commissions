@@ -2644,9 +2644,15 @@ export default function SettingsPage() {
                     className="input w-full"
                   >
                     <option value="all">All Reps</option>
-                    {Array.from(new Set(customers.map(c => c.fishbowlUsername).filter(Boolean))).sort().map(rep => (
-                      <option key={rep} value={rep}>{rep}</option>
-                    ))}
+                    {reps
+                      .filter(r => r.active)
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(rep => (
+                        <option key={rep.id} value={rep.salesPerson}>
+                          {rep.name} ({rep.salesPerson})
+                        </option>
+                      ))}
+                    <option value="">Unassigned</option>
                   </select>
                 </div>
 
