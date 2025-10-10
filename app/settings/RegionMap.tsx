@@ -30,6 +30,15 @@ interface CustomerSummary {
   lastOrderDate: string | null;
 }
 
+interface StateStats {
+  count: number;
+  sales: number;
+  sales_30d: number;
+  sales_90d: number;
+  activeCustomers: number;
+  growth: number;
+}
+
 interface RegionConfig {
   name: string;
   color: string;
@@ -73,7 +82,8 @@ export default function RegionMap() {
   const [regionStats, setRegionStats] = useState<{ [key: string]: RegionStats }>({});
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
-  const [stateStats, setStateStats] = useState<{ [key: string]: { count: number; sales: number } }>({});
+  const [stateStats, setStateStats] = useState<{ [key: string]: StateStats }>({});
+  const [sortBy, setSortBy] = useState<'sales' | 'customers' | 'growth'>('sales');
 
   const loadCustomers = useCallback(async () => {
     try {
@@ -126,15 +136,36 @@ export default function RegionMap() {
       console.log(`Loaded ${customersData.length} customer summaries`);
       setCustomers(customersData);
       
-      // Calculate state stats
-      const stats: { [key: string]: { count: number; sales: number } } = {};
+      // Calculate state stats with growth metrics
+      const stats: { [key: string]: StateStats } = {};
       customersData.forEach(c => {
         if (!stats[c.shippingState]) {
-          stats[c.shippingState] = { count: 0, sales: 0 };
+          stats[c.shippingState] = { 
+            count: 0, 
+            sales: 0, 
+            sales_30d: 0, 
+            sales_90d: 0, 
+            activeCustomers: 0,
+            growth: 0
+          };
         }
         stats[c.shippingState].count++;
         stats[c.shippingState].sales += c.totalSales;
+        stats[c.shippingState].sales_30d += c.sales_30d;
+        stats[c.shippingState].sales_90d += c.sales_90d;
+        if (c.orders_30d > 0) {
+          stats[c.shippingState].activeCustomers++;
+        }
       });
+
+      // Calculate growth percentage for each state
+      Object.keys(stats).forEach(state => {
+        const avg90d = stats[state].sales_90d / 3; // Average per 30 days over 90 days
+        if (avg90d > 0) {
+          stats[state].growth = ((stats[state].sales_30d - avg90d) / avg90d) * 100;
+        }
+      });
+
       setStateStats(stats);
 
       // Calculate region stats - match customers to regions by state
@@ -359,12 +390,84 @@ export default function RegionMap() {
         </div>
       </div>
 
-      {/* State Distribution */}
+      {/* State Distribution Heat Map */}
       <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          🗺️ Customer Distribution by State
-          {selectedRegion && ` - ${selectedRegion} Region`}
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">
+            🗺️ Customer Distribution by State
+            {selectedRegion && ` - ${selectedRegion} Region`}
+          </h3>
+          
+          {/* Sort Options */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">Sort by:</span>
+            <button
+              onClick={() => setSortBy('sales')}
+              className={`px-3 py-1 text-sm rounded ${
+                sortBy === 'sales'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Revenue
+            </button>
+            <button
+              onClick={() => setSortBy('customers')}
+              className={`px-3 py-1 text-sm rounded ${
+                sortBy === 'customers'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Customers
+            </button>
+            <button
+              onClick={() => setSortBy('growth')}
+              className={`px-3 py-1 text-sm rounded ${
+                sortBy === 'growth'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Growth
+            </button>
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="font-semibold text-gray-900 mb-2">Heat Map Intensity</div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-4 rounded" style={{ 
+                  background: 'linear-gradient(to right, rgba(59, 130, 246, 0.1), rgba(59, 130, 246, 1))' 
+                }} />
+                <span className="text-xs text-gray-600">Low → High Revenue</span>
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold text-gray-900 mb-2">Growth Indicators</div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-green-600" />
+                  <span className="text-xs text-gray-600">Growing (vs 90d avg)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <TrendingDown className="w-4 h-4 text-red-600" />
+                  <span className="text-xs text-gray-600">Declining (vs 90d avg)</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold text-gray-900 mb-2">Active Accounts</div>
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-blue-600" />
+                <span className="text-xs text-gray-600">Customers with orders in last 30 days</span>
+              </div>
+            </div>
+          </div>
+        </div>
         
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
           {Object.entries(stateStats)
@@ -373,33 +476,90 @@ export default function RegionMap() {
               const region = regions.find((r: RegionConfig) => r.name === selectedRegion);
               return region?.states.includes(state);
             })
-            .sort((a, b) => b[1].count - a[1].count)
+            .sort((a, b) => {
+              if (sortBy === 'sales') return b[1].sales - a[1].sales;
+              if (sortBy === 'customers') return b[1].count - a[1].count;
+              return b[1].growth - a[1].growth;
+            })
             .map(([state, stats]) => {
               const region = regions.find((r: RegionConfig) => r.states.includes(state));
               if (!region) return null;
 
+              // Calculate heat map intensity (0-1 scale based on sales)
+              const maxSales = Math.max(...Object.values(stateStats).map(s => s.sales));
+              const intensity = maxSales > 0 ? stats.sales / maxSales : 0;
+              
+              const isGrowing = stats.growth > 0;
+              const hasSignificantChange = Math.abs(stats.growth) > 5;
+
               return (
                 <div
                   key={state}
-                  className="p-3 rounded-lg border-2 hover:shadow-md transition-all"
+                  className="p-3 rounded-lg border-2 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden"
                   style={{ 
-                    backgroundColor: `${region.color}10`,
-                    borderColor: region.color
+                    backgroundColor: `rgba(${
+                      parseInt(region.color.slice(1, 3), 16)}, ${
+                      parseInt(region.color.slice(3, 5), 16)}, ${
+                      parseInt(region.color.slice(5, 7), 16)}, ${
+                      0.1 + (intensity * 0.3)
+                    })`,
+                    borderColor: region.color,
+                    borderWidth: intensity > 0.7 ? '3px' : '2px'
                   }}
                 >
+                  {/* Growth Indicator Badge */}
+                  {hasSignificantChange && (
+                    <div className={`absolute top-1 right-1 ${
+                      isGrowing ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {isGrowing ? (
+                        <TrendingUp className="w-4 h-4" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4" />
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-gray-900">{state}</span>
+                    <span className="font-bold text-gray-900 text-lg">{state}</span>
                     <div
-                      className="w-3 h-3 rounded-full"
+                      className="w-3 h-3 rounded-full ring-2 ring-white"
                       style={{ backgroundColor: region.color }}
                     />
                   </div>
-                  <div className="text-2xl font-bold" style={{ color: region.color }}>
+                  
+                  <div className="text-2xl font-bold mb-1" style={{ color: region.color }}>
                     {stats.count}
                   </div>
-                  <div className="text-xs text-gray-600">{STATE_NAMES[state]}</div>
-                  <div className="text-xs font-semibold text-gray-700 mt-1">
-                    {formatCurrency(stats.sales)}
+                  
+                  <div className="text-xs text-gray-600 mb-2">{STATE_NAMES[state]}</div>
+                  
+                  <div className="space-y-1 pt-2 border-t border-gray-200">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-600">Revenue:</span>
+                      <span className="font-semibold text-gray-900">
+                        {formatCurrency(stats.sales)}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-600 flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        Active:
+                      </span>
+                      <span className="font-semibold text-blue-700">
+                        {stats.activeCustomers}
+                      </span>
+                    </div>
+                    
+                    {hasSignificantChange && (
+                      <div className={`flex items-center justify-between text-xs font-semibold ${
+                        isGrowing ? 'text-green-700' : 'text-red-700'
+                      }`}>
+                        <span>Growth:</span>
+                        <span>{isGrowing ? '↑' : '↓'} {Math.abs(stats.growth).toFixed(1)}%</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
