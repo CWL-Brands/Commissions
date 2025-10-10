@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 id: firebaseUser.uid,
                 email: firebaseUser.email || '',
                 name: data.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-                role: data.role || 'sales',
+                role: (data.role || 'sales').toLowerCase() as 'admin' | 'manager' | 'sales', // Normalize to lowercase
               };
               console.log('✅ User profile loaded:', profile);
               setUserProfile(profile);
