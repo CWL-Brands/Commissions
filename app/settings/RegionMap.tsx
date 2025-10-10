@@ -435,15 +435,31 @@ export default function RegionMap() {
         </div>
 
         {/* Legend */}
-        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="mb-4 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border-2 border-gray-300">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
-              <div className="font-semibold text-gray-900 mb-2">Heat Map Intensity</div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-4 rounded" style={{ 
-                  background: 'linear-gradient(to right, rgba(59, 130, 246, 0.1), rgba(59, 130, 246, 1))' 
-                }} />
-                <span className="text-xs text-gray-600">Low → High Revenue</span>
+              <div className="font-semibold text-gray-900 mb-2">🔥 Heat Map Intensity (by Revenue)</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-12 h-6 rounded bg-gradient-to-r from-red-100 to-red-500 border border-red-600" />
+                  <span className="text-xs font-medium text-gray-700">Top 20% - 🔥 HOT</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-12 h-6 rounded bg-gradient-to-r from-orange-100 to-orange-400 border border-orange-500" />
+                  <span className="text-xs text-gray-600">Top 40%</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-12 h-6 rounded bg-gradient-to-r from-yellow-100 to-yellow-400 border border-yellow-500" />
+                  <span className="text-xs text-gray-600">Top 60%</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-12 h-6 rounded bg-gradient-to-r from-blue-100 to-blue-300 border border-blue-400" />
+                  <span className="text-xs text-gray-600">Top 80%</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-12 h-6 rounded bg-gradient-to-r from-gray-50 to-gray-200 border border-gray-300" />
+                  <span className="text-xs text-gray-600">Bottom 20% - ❄️ COLD</span>
+                </div>
               </div>
             </div>
             <div>
@@ -492,18 +508,26 @@ export default function RegionMap() {
               const isGrowing = stats.growth > 0;
               const hasSignificantChange = Math.abs(stats.growth) > 5;
 
+              // Heat map color gradient from light to very intense
+              const getHeatMapColor = (intensity: number) => {
+                if (intensity > 0.8) return 'from-red-100 to-red-500'; // Top 20% - HOT
+                if (intensity > 0.6) return 'from-orange-100 to-orange-400'; // Top 40%
+                if (intensity > 0.4) return 'from-yellow-100 to-yellow-400'; // Top 60%
+                if (intensity > 0.2) return 'from-blue-100 to-blue-300'; // Top 80%
+                return 'from-gray-50 to-gray-200'; // Bottom 20% - COLD
+              };
+
+              const getTextColor = (intensity: number) => {
+                if (intensity > 0.6) return 'text-white';
+                return 'text-gray-900';
+              };
+
               return (
                 <div
                   key={state}
-                  className="p-3 rounded-lg border-2 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden"
+                  className={`p-3 rounded-lg border-2 hover:shadow-lg transition-all cursor-pointer relative overflow-hidden bg-gradient-to-br ${getHeatMapColor(intensity)}`}
                   style={{ 
-                    backgroundColor: `rgba(${
-                      parseInt(region.color.slice(1, 3), 16)}, ${
-                      parseInt(region.color.slice(3, 5), 16)}, ${
-                      parseInt(region.color.slice(5, 7), 16)}, ${
-                      0.1 + (intensity * 0.3)
-                    })`,
-                    borderColor: region.color,
+                    borderColor: intensity > 0.6 ? '#DC2626' : region.color,
                     borderWidth: intensity > 0.7 ? '3px' : '2px'
                   }}
                 >
@@ -521,40 +545,44 @@ export default function RegionMap() {
                   )}
 
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-gray-900 text-lg">{state}</span>
+                    <span className={`font-bold text-lg ${getTextColor(intensity)}`}>{state}</span>
                     <div
                       className="w-3 h-3 rounded-full ring-2 ring-white"
                       style={{ backgroundColor: region.color }}
                     />
                   </div>
                   
-                  <div className="text-2xl font-bold mb-1" style={{ color: region.color }}>
+                  <div className={`text-2xl font-bold mb-1 ${getTextColor(intensity)}`}>
                     {stats.count}
                   </div>
                   
-                  <div className="text-xs text-gray-600 mb-2">{STATE_NAMES[state]}</div>
+                  <div className={`text-xs mb-2 ${intensity > 0.6 ? 'text-white/90' : 'text-gray-600'}`}>
+                    {STATE_NAMES[state]}
+                  </div>
                   
-                  <div className="space-y-1 pt-2 border-t border-gray-200">
+                  <div className={`space-y-1 pt-2 ${intensity > 0.6 ? 'border-white/30' : 'border-gray-200'} border-t`}>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600">Revenue:</span>
-                      <span className="font-semibold text-gray-900">
+                      <span className={intensity > 0.6 ? 'text-white/90' : 'text-gray-600'}>Revenue:</span>
+                      <span className={`font-semibold ${getTextColor(intensity)}`}>
                         {formatCurrency(stats.sales)}
                       </span>
                     </div>
                     
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600 flex items-center gap-1">
+                      <span className={`flex items-center gap-1 ${intensity > 0.6 ? 'text-white/90' : 'text-gray-600'}`}>
                         <Users className="w-3 h-3" />
                         Active:
                       </span>
-                      <span className="font-semibold text-blue-700">
+                      <span className={`font-semibold ${intensity > 0.6 ? 'text-white' : 'text-blue-700'}`}>
                         {stats.activeCustomers}
                       </span>
                     </div>
                     
                     {hasSignificantChange && (
                       <div className={`flex items-center justify-between text-xs font-semibold ${
-                        isGrowing ? 'text-green-700' : 'text-red-700'
+                        intensity > 0.6 
+                          ? 'text-white' 
+                          : isGrowing ? 'text-green-700' : 'text-red-700'
                       }`}>
                         <span>Growth:</span>
                         <span>{isGrowing ? '↑' : '↓'} {Math.abs(stats.growth).toFixed(1)}%</span>
