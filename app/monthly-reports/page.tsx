@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
@@ -146,7 +146,7 @@ export default function MonthlyReportsPage() {
       const itemsSnapshot = await getDocs(
         query(
           collection(db, 'fishbowl_soitems'),
-          where('orderNum', '==', orderNum)
+          where('salesOrderNum', '==', orderNum)
         )
       );
       
@@ -155,12 +155,12 @@ export default function MonthlyReportsPage() {
         const data = doc.data();
         items.push({
           id: doc.id,
-          productName: data.productName || data.description || 'Unknown Product',
-          productCode: data.productCode || data.productNum || '',
+          productName: data.description || data.product || data.partNumber || 'Unknown Product',
+          productCode: data.partNumber || data.partId || '',
           quantity: Number(data.quantity) || 0,
-          unitPrice: Number(data.unitPrice) || Number(data.price) || 0,
-          lineTotal: Number(data.lineTotal) || Number(data.totalPrice) || 0,
-          category: data.category || ''
+          unitPrice: Number(data.unitPrice) || 0,
+          lineTotal: Number(data.revenue) || 0, // Line item revenue
+          category: data.productC1 || ''
         });
       });
 
@@ -448,9 +448,8 @@ export default function MonthlyReportsPage() {
                 </thead>
                 <tbody>
                   {filteredDetails.map((detail) => (
-                    <>
+                    <React.Fragment key={detail.id}>
                       <tr 
-                        key={detail.id}
                         onClick={() => loadOrderLineItems(detail.orderNum)}
                         className="cursor-pointer hover:bg-gray-50 transition-colors"
                       >
@@ -524,7 +523,7 @@ export default function MonthlyReportsPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
