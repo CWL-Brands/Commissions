@@ -275,6 +275,29 @@ export default function CustomerMap() {
     await geocodeCustomers(needsGeocoding);
   };
 
+  const handleRefreshCustomerData = async () => {
+    if (!confirm('Refresh customer data? This will update sales metrics and sales rep assignments. Takes 2-3 minutes.')) {
+      return;
+    }
+    
+    const loadingToast = toast.loading('Refreshing customer data...');
+    
+    try {
+      const response = await fetch('/api/migrate-customer-summary', { method: 'POST' });
+      const result = await response.json();
+      
+      if (result.success) {
+        toast.success(`✅ Refreshed ${result.summariesCreated} customers!`, { id: loadingToast });
+        // Reload the map data
+        await loadData();
+      } else {
+        toast.error(`❌ Refresh failed: ${result.error}`, { id: loadingToast });
+      }
+    } catch (error: any) {
+      toast.error(`❌ Refresh failed: ${error.message}`, { id: loadingToast });
+    }
+  };
+
   // Filtered and sorted customers
   const filteredCustomers = useMemo(() => {
     let filtered = customers.filter(customer => {
@@ -554,17 +577,26 @@ export default function CustomerMap() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">📍 Customer Locations</h3>
-          {customers.filter(c => !c.lat || !c.lng).length > 0 && (
+          <div className="flex gap-2">
             <button
-              onClick={handleManualGeocode}
-              disabled={!mapsLoaded || geocodingProgress.total > 0}
-              className="btn btn-primary text-sm"
+              onClick={handleRefreshCustomerData}
+              className="btn btn-secondary text-sm"
+              title="Refresh customer sales data and sales rep assignments"
             >
-              {geocodingProgress.total > 0
-                ? `Geocoding... ${geocodingProgress.current}/${geocodingProgress.total}`
-                : `🗺️ Geocode ${customers.filter(c => !c.lat || !c.lng).length} Customers`}
+              🔄 Refresh Data
             </button>
-          )}
+            {customers.filter(c => !c.lat || !c.lng).length > 0 && (
+              <button
+                onClick={handleManualGeocode}
+                disabled={!mapsLoaded || geocodingProgress.total > 0}
+                className="btn btn-primary text-sm"
+              >
+                {geocodingProgress.total > 0
+                  ? `Geocoding... ${geocodingProgress.current}/${geocodingProgress.total}`
+                  : `🗺️ Geocode ${customers.filter(c => !c.lat || !c.lng).length} Customers`}
+              </button>
+            )}
+          </div>
         </div>
         
         {/* Legend */}
