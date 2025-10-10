@@ -333,13 +333,13 @@ export default function CustomerMap() {
             onLoad={onLoad}
             onUnmount={onUnmount}
           >
-            {customersWithCoords.map((customer) => (
+            {mapsLoaded && customersWithCoords.map((customer) => (
               <Marker
                 key={customer.id}
                 position={{ lat: customer.lat!, lng: customer.lng! }}
                 onClick={() => setSelectedCustomer(customer)}
                 icon={{
-                  path: google.maps.SymbolPath.CIRCLE,
+                  path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
                   scale: 8,
                   fillColor: customer.regionColor,
                   fillOpacity: 0.8,
