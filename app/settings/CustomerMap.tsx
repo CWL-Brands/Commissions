@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { GoogleMap, LoadScript, Marker, InfoWindow } from '@react-google-maps/api';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import toast from 'react-hot-toast';
 
 interface Customer {
   id: string;
@@ -109,44 +110,69 @@ export default function CustomerMap() {
     const geocoder = new google.maps.Geocoder();
     const batchSize = 10; // Process in batches to avoid rate limits
     const delay = 200; // ms between requests
+    let successCount = 0;
+    let errorCount = 0;
 
-    for (let i = 0; i < customersToGeocode.length; i += batchSize) {
-      const batch = customersToGeocode.slice(i, i + batchSize);
-      
-      await Promise.all(
-        batch.map(async (customer) => {
-          try {
-            const address = `${customer.shippingAddress}, ${customer.shippingCity}, ${customer.shippingState} ${customer.shippingZip}`;
-            const result = await geocoder.geocode({ address });
-            
-            if (result.results[0]) {
-              const location = result.results[0].geometry.location;
-              customer.lat = location.lat();
-              customer.lng = location.lng();
+    const loadingToast = toast.loading(`Starting geocoding for ${customersToGeocode.length} customers...`);
 
-              // Save to Firestore
-              const customerRef = doc(db, 'fishbowl_customers', customer.id);
-              await updateDoc(customerRef, {
-                lat: customer.lat,
-                lng: customer.lng
-              });
+    try {
+      for (let i = 0; i < customersToGeocode.length; i += batchSize) {
+        const batch = customersToGeocode.slice(i, i + batchSize);
+        
+        await Promise.all(
+          batch.map(async (customer) => {
+            try {
+              const address = `${customer.shippingAddress}, ${customer.shippingCity}, ${customer.shippingState} ${customer.shippingZip}`;
+              const result = await geocoder.geocode({ address });
+              
+              if (result.results[0]) {
+                const location = result.results[0].geometry.location;
+                customer.lat = location.lat();
+                customer.lng = location.lng();
+
+                // Save to Firestore
+                const customerRef = doc(db, 'fishbowl_customers', customer.id);
+                await updateDoc(customerRef, {
+                  lat: customer.lat,
+                  lng: customer.lng
+                });
+                successCount++;
+              } else {
+                errorCount++;
+              }
+            } catch (error) {
+              console.error(`Error geocoding ${customer.name}:`, error);
+              errorCount++;
             }
-          } catch (error) {
-            console.error(`Error geocoding ${customer.name}:`, error);
-          }
-        })
+          })
+        );
+
+        const progress = i + batch.length;
+        setGeocodingProgress({ current: progress, total: customersToGeocode.length });
+        
+        // Update toast with progress
+        toast.loading(`Geocoding... ${progress}/${customersToGeocode.length}`, { id: loadingToast });
+        
+        // Delay between batches
+        if (i + batchSize < customersToGeocode.length) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      // Success toast
+      toast.success(
+        `✅ Geocoding complete! ${successCount} customers mapped${errorCount > 0 ? `, ${errorCount} failed` : ''}`,
+        { id: loadingToast, duration: 5000 }
       );
 
-      setGeocodingProgress({ current: i + batch.length, total: customersToGeocode.length });
-      
-      // Delay between batches
-      if (i + batchSize < customersToGeocode.length) {
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
+      // Reload data to show newly geocoded customers
+      loadData();
+    } catch (error) {
+      console.error('Geocoding error:', error);
+      toast.error('❌ Geocoding failed. Please try again.', { id: loadingToast });
+    } finally {
+      setGeocodingProgress({ current: 0, total: 0 });
     }
-
-    // Reload data to show newly geocoded customers
-    loadData();
   };
 
   const onLoad = useCallback((map: google.maps.Map) => {
@@ -173,15 +199,16 @@ export default function CustomerMap() {
 
   const handleManualGeocode = async () => {
     if (!mapsLoaded) {
-      alert('Please wait for Google Maps to load first');
+      toast.error('⏳ Please wait for Google Maps to load first');
       return;
     }
     const needsGeocoding = customers.filter(c => !c.lat || !c.lng);
     if (needsGeocoding.length === 0) {
-      alert('All customers already have coordinates!');
+      toast.success('✅ All customers already have coordinates!');
       return;
     }
     if (!confirm(`Geocode ${needsGeocoding.length} customers? This may take a few minutes.`)) {
+      toast('Geocoding cancelled', { icon: 'ℹ️' });
       return;
     }
     setGeocodingProgress({ current: 0, total: needsGeocoding.length });
