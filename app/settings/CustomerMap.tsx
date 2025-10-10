@@ -74,8 +74,9 @@ export default function CustomerMap() {
       salesSnapshot.forEach((doc) => {
         const data = doc.data();
         const customerId = String(data.customerId);
-        const total = Number(data.totalPrice) || 0;
-        const dateIssued = data.dateIssued;
+        // Use revenue field (primary) or orderValue as fallback
+        const total = Number(data.revenue) || Number(data.orderValue) || 0;
+        const postingDateStr = data.postingDateStr || '';
         
         if (!salesByCustomer.has(customerId)) {
           salesByCustomer.set(customerId, { total: 0, count: 0, lastDate: '' });
@@ -86,8 +87,8 @@ export default function CustomerMap() {
         existing.count += 1;
         
         // Track most recent order date
-        if (!existing.lastDate || dateIssued > existing.lastDate) {
-          existing.lastDate = dateIssued;
+        if (!existing.lastDate || postingDateStr > existing.lastDate) {
+          existing.lastDate = postingDateStr;
         }
       });
 
