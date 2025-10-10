@@ -3,20 +3,53 @@
 import { useEffect, useState, useCallback } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { TrendingUp, TrendingDown, DollarSign, Users, ShoppingCart, Target } from 'lucide-react';
 
-interface Customer {
-  id: string;
-  name: string;
+interface CustomerSummary {
+  customerId: string;
+  customerName: string;
+  totalSales: number;
+  totalSalesYTD: number;
+  orderCount: number;
+  orderCountYTD: number;
+  sales_30d: number;
+  sales_90d: number;
+  sales_12m: number;
+  orders_30d: number;
+  orders_90d: number;
+  orders_12m: number;
+  avgOrderValue: number;
+  salesPerson: string;
+  salesPersonName: string;
+  salesPersonRegion: string;
+  region: string;
+  regionColor: string;
+  accountType: string;
   shippingState: string;
   shippingCity: string;
-  salesPerson: string;
-  accountType: string;
+  lastOrderDate: string | null;
 }
 
 interface RegionConfig {
   name: string;
   color: string;
   states: string[];
+}
+
+interface RegionStats {
+  name: string;
+  color: string;
+  customerCount: number;
+  totalSales: number;
+  totalSalesYTD: number;
+  avgOrderValue: number;
+  orderCount: number;
+  orderCountYTD: number;
+  sales_30d: number;
+  sales_90d: number;
+  activeCustomers_30d: number;
+  activeCustomers_90d: number;
+  topCustomers: CustomerSummary[];
 }
 
 const REGIONS: RegionConfig[] = [
@@ -63,38 +96,85 @@ const STATE_NAMES: { [key: string]: string } = {
 };
 
 export default function RegionMap() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [regionStats, setRegionStats] = useState<{ [key: string]: RegionStats }>({});
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
-  const [stateStats, setStateStats] = useState<{ [key: string]: number }>({});
+  const [stateStats, setStateStats] = useState<{ [key: string]: { count: number; sales: number } }>({});
 
   const loadCustomers = useCallback(async () => {
     try {
-      const snapshot = await getDocs(collection(db, 'fishbowl_customers'));
-      const customersData: Customer[] = [];
+      console.log('Loading customer summaries...');
+      const snapshot = await getDocs(collection(db, 'customer_sales_summary'));
+      const customersData: CustomerSummary[] = [];
       
       snapshot.forEach((doc) => {
         const data = doc.data();
-        if (data.shippingState) {
-          customersData.push({
-            id: doc.id,
-            name: data.name || 'Unknown',
-            shippingState: normalizeState(data.shippingState),
-            shippingCity: data.shippingCity || '',
-            salesPerson: data.salesPerson || 'Unassigned',
-            accountType: data.accountType || 'Retail'
-          });
-        }
+        customersData.push({
+          customerId: data.customerId || doc.id,
+          customerName: data.customerName || '',
+          totalSales: data.totalSales || 0,
+          totalSalesYTD: data.totalSalesYTD || 0,
+          orderCount: data.orderCount || 0,
+          orderCountYTD: data.orderCountYTD || 0,
+          sales_30d: data.sales_30d || 0,
+          sales_90d: data.sales_90d || 0,
+          sales_12m: data.sales_12m || 0,
+          orders_30d: data.orders_30d || 0,
+          orders_90d: data.orders_90d || 0,
+          orders_12m: data.orders_12m || 0,
+          avgOrderValue: data.avgOrderValue || 0,
+          salesPerson: data.salesPerson || '',
+          salesPersonName: data.salesPersonName || '',
+          salesPersonRegion: data.salesPersonRegion || '',
+          region: data.region || '',
+          regionColor: data.regionColor || '#808080',
+          accountType: data.accountType || '',
+          shippingState: normalizeState(data.shippingState || ''),
+          shippingCity: data.shippingCity || '',
+          lastOrderDate: data.lastOrderDate || null
+        });
       });
 
+      console.log(`Loaded ${customersData.length} customer summaries`);
       setCustomers(customersData);
       
       // Calculate state stats
-      const stats: { [key: string]: number } = {};
+      const stats: { [key: string]: { count: number; sales: number } } = {};
       customersData.forEach(c => {
-        stats[c.shippingState] = (stats[c.shippingState] || 0) + 1;
+        if (!stats[c.shippingState]) {
+          stats[c.shippingState] = { count: 0, sales: 0 };
+        }
+        stats[c.shippingState].count++;
+        stats[c.shippingState].sales += c.totalSales;
       });
       setStateStats(stats);
+
+      // Calculate region stats
+      const regStats: { [key: string]: RegionStats } = {};
+      REGIONS.forEach(region => {
+        const regionCustomers = customersData.filter(c => c.region === region.name);
+        regStats[region.name] = {
+          name: region.name,
+          color: region.color,
+          customerCount: regionCustomers.length,
+          totalSales: regionCustomers.reduce((sum, c) => sum + c.totalSales, 0),
+          totalSalesYTD: regionCustomers.reduce((sum, c) => sum + c.totalSalesYTD, 0),
+          avgOrderValue: regionCustomers.length > 0 
+            ? regionCustomers.reduce((sum, c) => sum + c.avgOrderValue, 0) / regionCustomers.length 
+            : 0,
+          orderCount: regionCustomers.reduce((sum, c) => sum + c.orderCount, 0),
+          orderCountYTD: regionCustomers.reduce((sum, c) => sum + c.orderCountYTD, 0),
+          sales_30d: regionCustomers.reduce((sum, c) => sum + c.sales_30d, 0),
+          sales_90d: regionCustomers.reduce((sum, c) => sum + c.sales_90d, 0),
+          activeCustomers_30d: regionCustomers.filter(c => c.orders_30d > 0).length,
+          activeCustomers_90d: regionCustomers.filter(c => c.orders_90d > 0).length,
+          topCustomers: regionCustomers
+            .sort((a, b) => b.totalSales - a.totalSales)
+            .slice(0, 5)
+        };
+      });
+      setRegionStats(regStats);
       
       setLoading(false);
     } catch (error) {
@@ -123,17 +203,17 @@ export default function RegionMap() {
     return REGIONS.find(r => r.states.includes(state));
   };
 
-  const getCustomersInRegion = (regionName: string) => {
-    const region = REGIONS.find(r => r.name === regionName);
-    if (!region) return [];
-    return customers.filter(c => region.states.includes(c.shippingState));
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value);
   };
 
-  const getStateColor = (state: string): string => {
-    const region = getRegionForState(state);
-    if (!region) return '#E5E7EB'; // gray for unmapped
-    if (selectedRegion && selectedRegion !== region.name) return '#F3F4F6'; // lighter gray
-    return region.color;
+  const formatNumber = (value: number) => {
+    return new Intl.NumberFormat('en-US').format(value);
   };
 
   if (loading) {
@@ -144,120 +224,236 @@ export default function RegionMap() {
     );
   }
 
+  const totalSales = Object.values(regionStats).reduce((sum, r) => sum + r.totalSales, 0);
+  const totalSalesYTD = Object.values(regionStats).reduce((sum, r) => sum + r.totalSalesYTD, 0);
+  const totalCustomers = customers.length;
+  const activeCustomers_30d = customers.filter(c => c.orders_30d > 0).length;
+
   return (
     <div className="space-y-6">
-      {/* Region Legend */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">🗺️ Sales Regions</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {REGIONS.map(region => {
-            const customerCount = getCustomersInRegion(region.name).length;
-            return (
-              <button
-                key={region.name}
-                onClick={() => setSelectedRegion(selectedRegion === region.name ? null : region.name)}
-                className={`p-4 rounded-lg border-2 transition-all ${
-                  selectedRegion === region.name
-                    ? 'border-gray-900 shadow-lg scale-105'
-                    : 'border-gray-200 hover:border-gray-400'
-                }`}
-                style={{ backgroundColor: `${region.color}15` }}
-              >
-                <div className="flex items-center space-x-2 mb-2">
-                  <div
-                    className="w-4 h-4 rounded-full"
-                    style={{ backgroundColor: region.color }}
-                  />
-                  <span className="font-semibold text-gray-900">{region.name}</span>
-                </div>
-                <div className="text-2xl font-bold text-gray-900">{customerCount}</div>
-                <div className="text-xs text-gray-600">customers</div>
-                <div className="text-xs text-gray-500 mt-2">
-                  {region.states.length} states
-                </div>
-              </button>
-            );
-          })}
+      {/* Executive Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="card bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-blue-900">Total Revenue</div>
+            <DollarSign className="w-5 h-5 text-blue-600" />
+          </div>
+          <div className="text-3xl font-bold text-blue-900">{formatCurrency(totalSales)}</div>
+          <div className="text-xs text-blue-700 mt-1">YTD: {formatCurrency(totalSalesYTD)}</div>
+        </div>
+
+        <div className="card bg-gradient-to-br from-green-50 to-green-100 border-green-200">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-green-900">Total Customers</div>
+            <Users className="w-5 h-5 text-green-600" />
+          </div>
+          <div className="text-3xl font-bold text-green-900">{formatNumber(totalCustomers)}</div>
+          <div className="text-xs text-green-700 mt-1">
+            {activeCustomers_30d} active (30d)
+          </div>
+        </div>
+
+        <div className="card bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-purple-900">Active Regions</div>
+            <Target className="w-5 h-5 text-purple-600" />
+          </div>
+          <div className="text-3xl font-bold text-purple-900">
+            {Object.keys(regionStats).length}
+          </div>
+          <div className="text-xs text-purple-700 mt-1">{Object.keys(stateStats).length} states</div>
+        </div>
+
+        <div className="card bg-gradient-to-br from-amber-50 to-amber-100 border-amber-200">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-amber-900">Avg Order Value</div>
+            <ShoppingCart className="w-5 h-5 text-amber-600" />
+          </div>
+          <div className="text-3xl font-bold text-amber-900">
+            {formatCurrency(
+              totalCustomers > 0
+                ? customers.reduce((sum, c) => sum + c.avgOrderValue, 0) / totalCustomers
+                : 0
+            )}
+          </div>
+          <div className="text-xs text-amber-700 mt-1">Across all regions</div>
         </div>
       </div>
 
-      {/* State-by-State Breakdown */}
+      {/* Region Performance Cards */}
+      <div className="card">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">📊 Region Performance</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Object.values(regionStats)
+            .sort((a, b) => b.totalSales - a.totalSales)
+            .map(region => {
+              const growth = region.sales_90d > 0 
+                ? ((region.sales_30d - (region.sales_90d / 3)) / (region.sales_90d / 3)) * 100 
+                : 0;
+              const isGrowing = growth > 0;
+
+              return (
+                <button
+                  key={region.name}
+                  onClick={() => setSelectedRegion(selectedRegion === region.name ? null : region.name)}
+                  className={`p-5 rounded-lg border-2 transition-all text-left ${
+                    selectedRegion === region.name
+                      ? 'border-gray-900 shadow-lg scale-105'
+                      : 'border-gray-200 hover:border-gray-400 hover:shadow-md'
+                  }`}
+                  style={{ backgroundColor: `${region.color}08` }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center space-x-2">
+                      <div
+                        className="w-4 h-4 rounded-full"
+                        style={{ backgroundColor: region.color }}
+                      />
+                      <span className="font-bold text-gray-900">{region.name}</span>
+                    </div>
+                    {isGrowing ? (
+                      <TrendingUp className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <TrendingDown className="w-5 h-5 text-red-600" />
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {formatCurrency(region.totalSales)}
+                      </div>
+                      <div className="text-xs text-gray-600">Total Revenue</div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-200">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {region.customerCount}
+                        </div>
+                        <div className="text-xs text-gray-600">Customers</div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {region.activeCustomers_30d}
+                        </div>
+                        <div className="text-xs text-gray-600">Active (30d)</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(region.sales_30d)}
+                        </div>
+                        <div className="text-xs text-gray-600">Last 30d</div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(region.avgOrderValue)}
+                        </div>
+                        <div className="text-xs text-gray-600">Avg Order</div>
+                      </div>
+                    </div>
+
+                    {Math.abs(growth) > 0.1 && (
+                      <div className={`text-xs font-medium ${isGrowing ? 'text-green-700' : 'text-red-700'}`}>
+                        {isGrowing ? '↑' : '↓'} {Math.abs(growth).toFixed(1)}% vs 90d avg
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+        </div>
+      </div>
+
+      {/* State Distribution */}
       <div className="card">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          📊 Customer Distribution by State
+          🗺️ Customer Distribution by State
           {selectedRegion && ` - ${selectedRegion} Region`}
         </h3>
         
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-          {REGIONS
-            .filter(r => !selectedRegion || r.name === selectedRegion)
-            .flatMap(region => 
-              region.states.map(state => ({
-                state,
-                region,
-                count: stateStats[state] || 0
-              }))
-            )
-            .sort((a, b) => b.count - a.count)
-            .map(({ state, region, count }) => (
-              <div
-                key={state}
-                className="p-3 rounded-lg border-2 border-gray-200 hover:border-gray-400 transition-all"
-                style={{ 
-                  backgroundColor: count > 0 ? `${region.color}10` : '#F9FAFB',
-                  borderColor: count > 0 ? region.color : '#E5E7EB'
-                }}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-gray-900">{state}</span>
-                  <div
-                    className="w-3 h-3 rounded-full"
-                    style={{ backgroundColor: region.color }}
-                  />
+          {Object.entries(stateStats)
+            .filter(([state]) => {
+              if (!selectedRegion) return true;
+              const region = REGIONS.find(r => r.name === selectedRegion);
+              return region?.states.includes(state);
+            })
+            .sort((a, b) => b[1].count - a[1].count)
+            .map(([state, stats]) => {
+              const region = REGIONS.find(r => r.states.includes(state));
+              if (!region) return null;
+
+              return (
+                <div
+                  key={state}
+                  className="p-3 rounded-lg border-2 hover:shadow-md transition-all"
+                  style={{ 
+                    backgroundColor: `${region.color}10`,
+                    borderColor: region.color
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-gray-900">{state}</span>
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: region.color }}
+                    />
+                  </div>
+                  <div className="text-2xl font-bold" style={{ color: region.color }}>
+                    {stats.count}
+                  </div>
+                  <div className="text-xs text-gray-600">{STATE_NAMES[state]}</div>
+                  <div className="text-xs font-semibold text-gray-700 mt-1">
+                    {formatCurrency(stats.sales)}
+                  </div>
                 </div>
-                <div className="text-2xl font-bold" style={{ color: region.color }}>
-                  {count}
-                </div>
-                <div className="text-xs text-gray-600">{STATE_NAMES[state]}</div>
-              </div>
-            ))}
+              );
+            })}
         </div>
       </div>
 
-      {/* Region Details */}
-      {selectedRegion && (
+      {/* Top Customers by Region */}
+      {selectedRegion && regionStats[selectedRegion] && (
         <div className="card">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            {selectedRegion} Region - Customer Details
+            🏆 Top 5 Customers - {selectedRegion} Region
           </h3>
           
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rank</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">City</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Sales</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Last 30d</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Orders</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sales Rep</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {getCustomersInRegion(selectedRegion).map(customer => (
-                  <tr key={customer.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{customer.name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{customer.shippingCity}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{customer.shippingState}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{customer.salesPerson}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        customer.accountType === 'Retail' ? 'bg-yellow-100 text-yellow-800' :
-                        customer.accountType === 'Wholesale' ? 'bg-blue-100 text-blue-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {customer.accountType}
-                      </span>
+                {regionStats[selectedRegion].topCustomers.map((customer, index) => (
+                  <tr key={customer.customerId} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-bold text-gray-900">#{index + 1}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{customer.customerName}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {customer.shippingCity}, {customer.shippingState}
                     </td>
+                    <td className="px-4 py-3 text-sm font-semibold text-right text-green-700">
+                      {formatCurrency(customer.totalSales)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-right text-gray-600">
+                      {formatCurrency(customer.sales_30d)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-right text-gray-600">
+                      {customer.orderCount}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{customer.salesPersonName}</td>
                   </tr>
                 ))}
               </tbody>
@@ -265,26 +461,6 @@ export default function RegionMap() {
           </div>
         </div>
       )}
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="card bg-blue-50">
-          <div className="text-sm font-medium text-blue-900 mb-1">Total Customers</div>
-          <div className="text-3xl font-bold text-blue-600">{customers.length}</div>
-        </div>
-        <div className="card bg-green-50">
-          <div className="text-sm font-medium text-green-900 mb-1">States Covered</div>
-          <div className="text-3xl font-bold text-green-600">
-            {Object.keys(stateStats).length}
-          </div>
-        </div>
-        <div className="card bg-purple-50">
-          <div className="text-sm font-medium text-purple-900 mb-1">Regions Active</div>
-          <div className="text-3xl font-bold text-purple-600">
-            {REGIONS.filter(r => getCustomersInRegion(r.name).length > 0).length}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
