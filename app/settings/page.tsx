@@ -25,9 +25,11 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Lock
+  Lock,
+  Map as MapIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import RegionMap from './RegionMap';
 import { CommissionConfig, CommissionBucket, ProductSubGoal, ActivitySubGoal, RoleCommissionScale, RepRole, CommissionEntry } from '@/types';
 import { validateWeightsSum, calculatePayout, formatCurrency, formatAttainment } from '@/lib/commission/calculator';
 import MonthYearModal from '@/components/MonthYearModal';
@@ -103,6 +105,7 @@ export default function SettingsPage() {
   const [selectedOrgLevel, setSelectedOrgLevel] = useState<'all' | 'vp' | 'director' | 'regional' | 'division' | 'territory' | 'rep'>('all');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
+  const [orgChartSubTab, setOrgChartSubTab] = useState<'team' | 'regions'>('team');
 
   // Database state
   const [entries, setEntries] = useState<CommissionEntry[]>([]);
@@ -3160,7 +3163,7 @@ export default function SettingsPage() {
         {/* Org Chart Tab */}
         {activeTab === 'orgchart' && (
           <div className="space-y-8">
-            {/* Header */}
+            {/* Header with Sub-Tabs */}
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -3169,38 +3172,77 @@ export default function SettingsPage() {
                     Manage your sales organization hierarchy and territory assignments
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setEditingUser(null);
-                    setShowAddUserModal(true);
-                  }}
-                  className="btn btn-primary flex items-center"
-                >
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Add User
-                </button>
+                {orgChartSubTab === 'team' && (
+                  <button
+                    onClick={() => {
+                      setEditingUser(null);
+                      setShowAddUserModal(true);
+                    }}
+                    className="btn btn-primary flex items-center"
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Add User
+                  </button>
+                )}
               </div>
 
-              {/* Filter by Org Level */}
-              <div className="flex items-center space-x-4">
-                <label className="text-sm font-medium text-gray-700">Filter by Level:</label>
-                <select
-                  value={selectedOrgLevel}
-                  onChange={(e) => setSelectedOrgLevel(e.target.value as any)}
-                  className="input"
-                >
-                  <option value="all">All Levels</option>
-                  <option value="vp">VP Sales</option>
-                  <option value="director">Directors</option>
-                  <option value="regional">Regional Managers</option>
-                  <option value="division">Division Managers</option>
-                  <option value="territory">Territory Managers</option>
-                  <option value="rep">Sales Reps</option>
-                </select>
+              {/* Sub-Tabs */}
+              <div className="border-b border-gray-200 mb-4">
+                <nav className="-mb-px flex space-x-8">
+                  <button
+                    onClick={() => setOrgChartSubTab('team')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      orgChartSubTab === 'team'
+                        ? 'border-primary-500 text-primary-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <Users className="w-4 h-4 inline mr-2" />
+                    Team Members
+                  </button>
+                  <button
+                    onClick={() => setOrgChartSubTab('regions')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      orgChartSubTab === 'regions'
+                        ? 'border-primary-500 text-primary-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <MapIcon className="w-4 h-4 inline mr-2" />
+                    Regional Map
+                  </button>
+                </nav>
               </div>
+
+              {/* Filter by Org Level - Only show on Team tab */}
+              {orgChartSubTab === 'team' && (
+                <div className="flex items-center space-x-4">
+                  <label className="text-sm font-medium text-gray-700">Filter by Level:</label>
+                  <select
+                    value={selectedOrgLevel}
+                    onChange={(e) => setSelectedOrgLevel(e.target.value as any)}
+                    className="input"
+                  >
+                    <option value="all">All Levels</option>
+                    <option value="vp">VP Sales</option>
+                    <option value="director">Directors</option>
+                    <option value="regional">Regional Managers</option>
+                    <option value="division">Division Managers</option>
+                    <option value="territory">Territory Managers</option>
+                    <option value="rep">Sales Reps</option>
+                  </select>
+                </div>
+              )}
             </div>
 
-            {/* Users Table */}
+            {/* Regional Map Sub-Tab */}
+            {orgChartSubTab === 'regions' && (
+              <RegionMap />
+            )}
+
+            {/* Users Table - Only show on Team tab */}
+            {orgChartSubTab === 'team' && (
+            <>
             <div className="card">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Team Members ({orgUsers.filter(u => selectedOrgLevel === 'all' || u.orgRole === selectedOrgLevel).length})
@@ -3313,6 +3355,8 @@ export default function SettingsPage() {
                 <div className="text-xs text-gray-600">Sales Reps</div>
               </div>
             </div>
+            </>
+            )}
           </div>
         )}
 
