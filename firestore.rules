@@ -93,6 +93,12 @@ service cloud.firestore {
       allow write: if true;
     }
     
+    // Customer sales summary (pre-aggregated data for fast queries)
+    match /customer_sales_summary/{customerId} {
+      allow read: if true;
+      allow write: if true; // Allow migration API to update
+    }
+    
     // Regions collection (internal app - permissive)
     match /regions/{regionId} {
       allow read: if true;
