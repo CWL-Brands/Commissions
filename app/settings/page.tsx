@@ -43,7 +43,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q4 2025');
   const [quarters, setQuarters] = useState<string[]>(['Q4 2025', 'Q1 2026']);
-  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'customers' | 'team' | 'orgchart' | 'database'>('quarterly');
+  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'customers' | 'team' | 'orgchart'>('quarterly');
 
   // Configuration state
   const [config, setConfig] = useState<CommissionConfig>({
@@ -100,6 +100,8 @@ export default function SettingsPage() {
   const [commissionRules, setCommissionRules] = useState({
     excludeShipping: true,
     useOrderValue: true,
+    applyReorgRule: true, // July 2025 reorg - transferred customers get 2%
+    reorgDate: '2025-07-01', // Date of the reorg
   });
 
   // Org Chart state
@@ -109,13 +111,6 @@ export default function SettingsPage() {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [orgChartSubTab, setOrgChartSubTab] = useState<'team' | 'regions' | 'regionManager' | 'map'>('team');
 
-  // Database state
-  const [entries, setEntries] = useState<CommissionEntry[]>([]);
-  const [monthlyCommissions, setMonthlyCommissions] = useState<any[]>([]);
-  const [databaseSubTab, setDatabaseSubTab] = useState<'quarterly' | 'monthly'>('quarterly');
-  const [filterRep, setFilterRep] = useState('all');
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [calculating, setCalculating] = useState(false);
 
   // Customer Management state
   const [customers, setCustomers] = useState<any[]>([]);
@@ -135,6 +130,7 @@ export default function SettingsPage() {
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
   const [batchAccountType, setBatchAccountType] = useState('');
   const [batchSalesRep, setBatchSalesRep] = useState('');
+  const [batchTransferStatus, setBatchTransferStatus] = useState('');
   const [savingBatch, setSavingBatch] = useState(false);
 
   // Fishbowl Import state
@@ -317,11 +313,7 @@ export default function SettingsPage() {
     if (activeTab === 'orgchart') {
       loadOrgUsers();
     }
-    if (activeTab === 'database' && user) {
-      loadEntries(user.uid);
-      loadMonthlyCommissions(user.uid);
-    }
-  }, [activeTab, user, filterRep, isAdmin]);
+  }, [activeTab, user, isAdmin]);
 
   // Load customers when customers tab is active
   useEffect(() => {
@@ -760,12 +752,17 @@ export default function SettingsPage() {
       for (const rep of reps) {
         const { id, ...data } = rep;
         
+        // Get the Fishbowl username - it's stored as 'salesPerson' in the reps array
+        const fishbowlUsername = data.salesPerson || data.fishbowlUsername || '';
+        
+        console.log(`Saving rep ${data.name}: salesPerson = ${fishbowlUsername}`);
+        
         // Map to users collection schema
         const userData: any = {
           name: data.name,
           email: data.email,
           title: data.title,
-          salesPerson: data.fishbowlUsername || data.salesPerson, // Fishbowl username
+          salesPerson: fishbowlUsername, // This is the Fishbowl username field
           isActive: data.active,
           role: 'sales',
           isCommissioned: true,
@@ -785,6 +782,7 @@ export default function SettingsPage() {
         } else {
           // Updating existing user
           await updateDoc(doc(db, 'users', id), userData);
+          console.log(`✅ Updated user ${id} with salesPerson: ${fishbowlUsername}`);
         }
       }
       toast.success('Sales reps saved successfully');
@@ -795,6 +793,56 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Helper to get rate value
+  const getRateValue = (segmentId: string, status: string): number | string => {
+    const rate = commissionRates.rates.find(
+      (r: any) => r.title === selectedTitle && r.segmentId === segmentId && r.status === status
+    );
+    // Return saved value or default
+    if (rate) return rate.percentage;
+    
+    // Default values
+    if (status === 'new_business') {
+      return segmentId === 'distributor' ? 8.0 : 10.0;
+    } else if (status === '6_month_active') {
+      return segmentId === 'distributor' ? 5.0 : 7.0;
+    } else if (status === '12_month_active') {
+      return segmentId === 'distributor' ? 3.0 : 5.0;
+    }
+    return '';
+  };
+
+  // Helper to update rate value
+  const updateRateValue = (segmentId: string, status: string, percentage: number | string, active: boolean = true) => {
+    const existingRateIndex = commissionRates.rates.findIndex(
+      (r: any) => r.title === selectedTitle && r.segmentId === segmentId && r.status === status
+    );
+
+    // Convert to number, but allow empty string to stay as empty
+    const percentageValue = percentage === '' ? '' : (typeof percentage === 'string' ? parseFloat(percentage) : percentage);
+
+    const newRate = {
+      title: selectedTitle,
+      segmentId,
+      status,
+      percentage: percentageValue,
+      active
+    };
+
+    let updatedRates;
+    if (existingRateIndex >= 0) {
+      updatedRates = [...commissionRates.rates];
+      updatedRates[existingRateIndex] = newRate;
+    } else {
+      updatedRates = [...commissionRates.rates, newRate];
+    }
+
+    setCommissionRates({
+      ...commissionRates,
+      rates: updatedRates
+    });
   };
 
   const handleSaveCommissionRates = async () => {
@@ -826,57 +874,6 @@ export default function SettingsPage() {
     }
   };
 
-  const loadEntries = async (userId: string) => {
-    try {
-      let q = query(
-        collection(db, 'commission_entries'),
-        where('quarterId', '==', selectedQuarter),
-        orderBy('createdAt', 'desc')
-      );
-
-      if (!isAdmin) {
-        q = query(q, where('repId', '==', userId));
-      } else if (filterRep !== 'all') {
-        q = query(q, where('repId', '==', filterRep));
-      }
-
-      const snapshot = await getDocs(q);
-      const entriesData: CommissionEntry[] = [];
-      snapshot.forEach((doc) => {
-        entriesData.push({ id: doc.id, ...doc.data() } as CommissionEntry);
-      });
-      setEntries(entriesData);
-    } catch (error) {
-      console.error('Error loading entries:', error);
-      toast.error('Failed to load commission entries');
-    }
-  };
-
-  const loadMonthlyCommissions = async (userId: string) => {
-    try {
-      let q = query(
-        collection(db, 'monthly_commissions'),
-        orderBy('commissionMonth', 'desc')
-      );
-
-      if (!isAdmin && filterRep === 'all') {
-        q = query(q, where('repId', '==', userId));
-      } else if (filterRep !== 'all') {
-        q = query(q, where('repId', '==', filterRep));
-      }
-
-      const snapshot = await getDocs(q);
-      const commissionsData: any[] = [];
-      snapshot.forEach((doc) => {
-        commissionsData.push({ id: doc.id, ...doc.data() });
-      });
-      setMonthlyCommissions(commissionsData);
-      console.log(`Loaded ${commissionsData.length} monthly commissions`);
-    } catch (error) {
-      console.error('Error loading monthly commissions:', error);
-      toast.error('Failed to load monthly commissions');
-    }
-  };
 
   const loadCustomers = async () => {
     console.log('Loading customers...');
@@ -947,6 +944,31 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error loading customers:', error);
       toast.error('Failed to load customers');
+    }
+  };
+
+  const updateTransferStatus = async (customerId: string, newStatus: string) => {
+    setSavingCustomer(customerId);
+    try {
+      const customerRef = doc(db, 'fishbowl_customers', customerId);
+      await updateDoc(customerRef, {
+        transferStatus: newStatus === 'auto' ? null : newStatus
+      });
+      
+      // Update local state
+      setCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, transferStatus: newStatus === 'auto' ? null : newStatus } : c
+      ));
+      setFilteredCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, transferStatus: newStatus === 'auto' ? null : newStatus } : c
+      ));
+      
+      toast.success('Transfer status updated');
+    } catch (error) {
+      console.error('Error updating transfer status:', error);
+      toast.error('Failed to update transfer status');
+    } finally {
+      setSavingCustomer(null);
     }
   };
 
@@ -1069,8 +1091,8 @@ export default function SettingsPage() {
       return;
     }
 
-    if (!batchAccountType && !batchSalesRep) {
-      toast.error('Please select an account type or sales rep to update');
+    if (!batchAccountType && !batchSalesRep && !batchTransferStatus) {
+      toast.error('Please select at least one field to update');
       return;
     }
 
@@ -1079,21 +1101,21 @@ export default function SettingsPage() {
 
     try {
       const updates: any = {};
-      if (batchAccountType) updates.accountType = batchAccountType;
       
-      // For sales rep, we need to update both fishbowlUsername and salesPerson (display name)
-      let repName = '';
+      if (batchAccountType) {
+        updates.accountType = batchAccountType;
+      }
+      
       if (batchSalesRep) {
-        if (batchSalesRep === 'UNASSIGNED') {
-          // Unassign the sales rep
-          updates.fishbowlUsername = '';
-          updates.salesPerson = 'Unassigned';
-        } else {
-          // Assign to a specific rep
-          updates.fishbowlUsername = batchSalesRep;
-          repName = reps.find(r => r.salesPerson === batchSalesRep)?.name || batchSalesRep;
-          updates.salesPerson = repName;
+        const selectedRep = reps.find(r => r.id === batchSalesRep);
+        if (selectedRep) {
+          updates.salesPerson = selectedRep.name;
+          updates.fishbowlUsername = selectedRep.salesPerson;
         }
+      }
+
+      if (batchTransferStatus) {
+        updates.transferStatus = batchTransferStatus === 'auto' ? null : batchTransferStatus;
       }
 
       // Update in Firestore
@@ -1118,6 +1140,7 @@ export default function SettingsPage() {
       setSelectedCustomers(new Set());
       setBatchAccountType('');
       setBatchSalesRep('');
+      setBatchTransferStatus('');
       setBatchEditMode(false);
     } catch (error) {
       console.error('Error batch updating customers:', error);
@@ -1167,66 +1190,6 @@ export default function SettingsPage() {
     setFilteredCustomers(filtered);
   }, [searchTerm, selectedRep, selectedAccountType, selectedCity, selectedState, customers, activeTab, sortField, sortDirection]);
 
-  const handleBulkUpload = async (csvText: string) => {
-    if (!isAdmin || !config || !user) {
-      toast.error('Admin access required');
-      return;
-    }
-
-    try {
-      const lines = csvText.split('\n').filter(line => line.trim());
-      const headers = lines[0].split(',').map(h => h.trim());
-      
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim());
-        const row: any = {};
-        headers.forEach((header, index) => {
-          row[header] = values[index];
-        });
-
-        try {
-          const goalValue = parseFloat(row.goalValue) || 0;
-          const actualValue = parseFloat(row.actualValue) || 0;
-
-          const result = calculatePayout({
-            goalValue: goalValue,
-            actualValue: actualValue,
-            minAttainment: config.minAttainment,
-            overPerfCap: config.overPerfCap
-          });
-
-          await addDoc(collection(db, 'commission_entries'), {
-            quarterId: row.quarterId || selectedQuarter,
-            repId: row.repId,
-            bucketCode: row.bucketCode,
-            goalValue: goalValue,
-            actualValue: actualValue,
-            attainment: result.attainment,
-            payout: result.payout,
-            subGoalId: row.subGoalId || null,
-            notes: row.notes || '',
-            createdAt: new Date(),
-            createdBy: user.uid
-          });
-
-          successCount++;
-        } catch (error) {
-          console.error('Error processing row:', error);
-          errorCount++;
-        }
-      }
-
-      toast.success(`Imported ${successCount} entries. ${errorCount} errors.`);
-      setShowUploadModal(false);
-      await loadEntries(user.uid);
-    } catch (error) {
-      console.error('Error bulk uploading:', error);
-      toast.error('Failed to upload data');
-    }
-  };
 
   const handleFishbowlImport = async () => {
     if (!fishbowlFile) {
@@ -1289,10 +1252,26 @@ export default function SettingsPage() {
         throw new Error(data.error || 'Calculation failed');
       }
       
-      toast.success(
-        `✅ Calculated ${data.commissionsCalculated} commissions! Total: $${data.totalCommission.toFixed(2)}`,
-        { id: loadingToast, duration: 5000 }
-      );
+      // Show detailed success message
+      if (data.commissionsCalculated > 0) {
+        toast.success(
+          `✅ Calculated ${data.commissionsCalculated} commissions! Total: $${data.totalCommission.toFixed(2)}`,
+          { id: loadingToast, duration: 8000 }
+        );
+      } else {
+        // Show warning if no commissions calculated
+        toast.error(
+          `⚠️ No commissions calculated. Check console for details.`,
+          { id: loadingToast, duration: 10000 }
+        );
+      }
+      
+      // Log detailed summary to console for user
+      console.log('\n🎯 COMMISSION CALCULATION COMPLETE');
+      console.log(`✅ Commissions: ${data.commissionsCalculated}`);
+      console.log(`💰 Total: $${data.totalCommission?.toFixed(2) || '0.00'}`);
+      console.log(`📋 Orders Processed: ${data.processed}`);
+      
     } catch (error: any) {
       toast.error(error.message || 'Failed to calculate commissions', { id: loadingToast });
     } finally {
@@ -1418,16 +1397,6 @@ export default function SettingsPage() {
               }`}
             >
               Org Chart
-            </button>
-            <button
-              onClick={() => setActiveTab('database')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'database'
-                  ? 'border-primary-500 text-primary-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Database
             </button>
           </nav>
         </div>
@@ -2264,6 +2233,35 @@ export default function SettingsPage() {
                   </label>
                 </div>
 
+                {/* Apply Reorg Rule */}
+                <div className="flex items-start p-4 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="applyReorgRule"
+                    checked={commissionRules.applyReorgRule}
+                    onChange={(e) => setCommissionRules({...commissionRules, applyReorgRule: e.target.checked})}
+                    className="mt-1 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="applyReorgRule" className="ml-3 flex-1">
+                    <span className="text-sm font-medium text-gray-900">Apply July 2025 Reorg Rule (Transferred Customers = 2%)</span>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Customers transferred to a rep after <strong>{commissionRules.reorgDate}</strong> automatically receive 2% commission rate. 
+                      This rule expires January 1, 2026.
+                    </p>
+                    {commissionRules.applyReorgRule && (
+                      <div className="mt-3">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Reorg Effective Date</label>
+                        <input
+                          type="date"
+                          value={commissionRules.reorgDate}
+                          onChange={(e) => setCommissionRules({...commissionRules, reorgDate: e.target.value})}
+                          className="input text-sm max-w-xs"
+                        />
+                      </div>
+                    )}
+                  </label>
+                </div>
+
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <p className="text-sm text-blue-800">
                     <strong>Note:</strong> These rules apply to both monthly commissions and quarterly bonus calculations. 
@@ -2351,7 +2349,8 @@ export default function SettingsPage() {
                             <div className="flex items-center max-w-xs">
                               <input
                                 type="number"
-                                defaultValue={segment.id === 'distributor' ? '8.0' : '10.0'}
+                                value={getRateValue(segment.id, 'new_business')}
+                                onChange={(e) => updateRateValue(segment.id, 'new_business', e.target.value)}
                                 step="0.1"
                                 min="0"
                                 max="100"
@@ -2364,7 +2363,8 @@ export default function SettingsPage() {
                           <td className="px-4 py-3 text-center">
                             <input
                               type="checkbox"
-                              defaultChecked
+                              checked={commissionRates.rates.find((r: any) => r.title === selectedTitle && r.segmentId === segment.id && r.status === 'new_business')?.active ?? true}
+                              onChange={(e) => updateRateValue(segment.id, 'new_business', getRateValue(segment.id, 'new_business'), e.target.checked)}
                               className="w-4 h-4"
                             />
                           </td>
@@ -2380,7 +2380,8 @@ export default function SettingsPage() {
                             <div className="flex items-center max-w-xs">
                               <input
                                 type="number"
-                                defaultValue={segment.id === 'distributor' ? '5.0' : '7.0'}
+                                value={getRateValue(segment.id, '6_month_active')}
+                                onChange={(e) => updateRateValue(segment.id, '6_month_active', e.target.value)}
                                 step="0.1"
                                 min="0"
                                 max="100"
@@ -2393,7 +2394,8 @@ export default function SettingsPage() {
                           <td className="px-4 py-3 text-center">
                             <input
                               type="checkbox"
-                              defaultChecked
+                              checked={commissionRates.rates.find((r: any) => r.title === selectedTitle && r.segmentId === segment.id && r.status === '6_month_active')?.active ?? true}
+                              onChange={(e) => updateRateValue(segment.id, '6_month_active', getRateValue(segment.id, '6_month_active'), e.target.checked)}
                               className="w-4 h-4"
                             />
                           </td>
@@ -2409,7 +2411,8 @@ export default function SettingsPage() {
                             <div className="flex items-center max-w-xs">
                               <input
                                 type="number"
-                                defaultValue={segment.id === 'distributor' ? '3.0' : '5.0'}
+                                value={getRateValue(segment.id, '12_month_active')}
+                                onChange={(e) => updateRateValue(segment.id, '12_month_active', e.target.value)}
                                 step="0.1"
                                 min="0"
                                 max="100"
@@ -2422,7 +2425,8 @@ export default function SettingsPage() {
                           <td className="px-4 py-3 text-center">
                             <input
                               type="checkbox"
-                              defaultChecked
+                              checked={commissionRates.rates.find((r: any) => r.title === selectedTitle && r.segmentId === segment.id && r.status === '12_month_active')?.active ?? true}
+                              onChange={(e) => updateRateValue(segment.id, '12_month_active', getRateValue(segment.id, '12_month_active'), e.target.checked)}
                               className="w-4 h-4"
                             />
                           </td>
@@ -2724,7 +2728,7 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Update Account Type
@@ -2757,6 +2761,22 @@ export default function SettingsPage() {
                           {rep.name} ({rep.salesPerson})
                         </option>
                       ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Transfer Status
+                    </label>
+                    <select
+                      value={batchTransferStatus}
+                      onChange={(e) => setBatchTransferStatus(e.target.value)}
+                      className="input w-full"
+                    >
+                      <option value="">Don&apos;t Change</option>
+                      <option value="auto">🤖 Auto (Calculate)</option>
+                      <option value="own">👤 Own (8%)</option>
+                      <option value="transferred">🔄 Transferred (2%)</option>
                     </select>
                   </div>
 
@@ -2841,8 +2861,18 @@ export default function SettingsPage() {
                         </div>
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        <span>Current Owner</span>
-                        <span className="ml-1 text-xs text-gray-400">(Fishbowl)</span>
+                        <div 
+                          className="flex items-center space-x-1 cursor-pointer hover:text-primary-600"
+                          onClick={() => handleSort('originalOwner')}
+                        >
+                          <span>Current Owner</span>
+                          <span className="ml-1 text-xs text-gray-400">(Fishbowl)</span>
+                          {sortField === 'originalOwner' ? (
+                            sortDirection === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />
+                          ) : (
+                            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-56">
                         <div 
@@ -2856,6 +2886,9 @@ export default function SettingsPage() {
                             <ArrowUpDown className="w-4 h-4 text-gray-400" />
                           )}
                         </div>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
+                        Transfer Status
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         <div 
@@ -2889,7 +2922,7 @@ export default function SettingsPage() {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredCustomers.length === 0 ? (
                       <tr>
-                        <td colSpan={batchEditMode ? 9 : 8} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={batchEditMode ? 10 : 9} className="px-4 py-8 text-center text-gray-500">
                           No customers found
                         </td>
                       </tr>
@@ -2988,6 +3021,23 @@ export default function SettingsPage() {
                                 </select>
                               );
                             })()}
+                          </td>
+                          <td className="px-4 py-3">
+                            <select
+                              value={customer.transferStatus || 'auto'}
+                              onChange={(e) => updateTransferStatus(customer.id, e.target.value)}
+                              className={`input text-sm ${
+                                !customer.transferStatus || customer.transferStatus === 'auto'
+                                  ? 'bg-gray-50 border-gray-300'
+                                  : customer.transferStatus === 'own'
+                                  ? 'bg-purple-50 border-purple-300'
+                                  : 'bg-blue-50 border-blue-300'
+                              }`}
+                            >
+                              <option value="auto">🤖 Auto</option>
+                              <option value="own">👤 Own (8%)</option>
+                              <option value="transferred">🔄 Transferred (2%)</option>
+                            </select>
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-600">{customer.shippingCity || '-'}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{customer.shippingState || '-'}</td>
@@ -3418,220 +3468,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Database Tab */}
-        {activeTab === 'database' && (
-          <div className="space-y-8">
-            {/* Header with Actions */}
-            <div className="card">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900">📊 Commission Database</h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    View quarterly bonuses and monthly commissions
-                  </p>
-                </div>
-                {isAdmin && databaseSubTab === 'quarterly' && (
-                  <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="btn btn-primary flex items-center"
-                  >
-                    <Upload className="w-4 h-4 mr-2" />
-                    Bulk Upload
-                  </button>
-                )}
-              </div>
-
-              {/* Sub-tabs */}
-              <div className="flex space-x-4 border-b border-gray-200 mb-6">
-                <button
-                  onClick={() => setDatabaseSubTab('quarterly')}
-                  className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
-                    databaseSubTab === 'quarterly'
-                      ? 'border-primary-500 text-primary-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  Quarterly Bonuses
-                </button>
-                <button
-                  onClick={() => setDatabaseSubTab('monthly')}
-                  className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
-                    databaseSubTab === 'monthly'
-                      ? 'border-primary-500 text-primary-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  Monthly Commissions
-                </button>
-              </div>
-
-              {/* Filters */}
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Quarter
-                  </label>
-                  <select
-                    value={selectedQuarter}
-                    onChange={(e) => setSelectedQuarter(e.target.value)}
-                    className="input w-full"
-                  >
-                    {quarters.map(q => (
-                      <option key={q} value={q}>{q}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {isAdmin && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Filter by Rep
-                    </label>
-                    <select
-                      value={filterRep}
-                      onChange={(e) => setFilterRep(e.target.value)}
-                      className="input w-full"
-                    >
-                      <option value="all">All Reps</option>
-                      {reps.map(rep => (
-                        <option key={rep.id} value={rep.id}>
-                          {rep.name} ({rep.title})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Quarterly Bonuses Table */}
-            {databaseSubTab === 'quarterly' && (
-            <div className="card">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Commission Entries ({entries.length})
-              </h3>
-
-              {entries.length === 0 ? (
-                <div className="text-center py-12">
-                  <DatabaseIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 mb-2">No commission entries found</p>
-                  <p className="text-sm text-gray-400">
-                    {isAdmin ? 'Click "Bulk Upload" to import data' : 'No entries for this quarter'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Rep</th>
-                        <th>Bucket</th>
-                        <th>Goal</th>
-                        <th>Actual</th>
-                        <th>Attainment</th>
-                        <th>Payout</th>
-                        <th>Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {entries.map((entry) => {
-                        const rep = reps.find(r => r.id === entry.repId);
-                        const bucket = config?.buckets.find(b => b.code === entry.bucketCode);
-                        
-                        return (
-                          <tr key={entry.id}>
-                            <td className="font-medium">{rep?.name || 'Unknown'}</td>
-                            <td>
-                              <span className="px-2 py-1 text-xs rounded-full bg-primary-100 text-primary-800">
-                                {entry.bucketCode} - {bucket?.name || 'Unknown'}
-                              </span>
-                            </td>
-                            <td className="text-right">{formatCurrency(entry.goalValue)}</td>
-                            <td className="text-right">{formatCurrency(entry.actualValue)}</td>
-                            <td className="text-right">
-                              <span className={`font-semibold ${
-                                entry.attainment >= 1 ? 'text-green-600' : 
-                                entry.attainment >= 0.75 ? 'text-yellow-600' : 
-                                'text-red-600'
-                              }`}>
-                                {formatAttainment(entry.attainment)}
-                              </span>
-                            </td>
-                            <td className="text-right font-semibold">{formatCurrency(entry.payout)}</td>
-                            <td className="text-sm text-gray-600">{entry.notes || '-'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            )}
-
-            {/* Monthly Commissions Table */}
-            {databaseSubTab === 'monthly' && (
-            <div className="card">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Monthly Commissions ({monthlyCommissions.length})
-              </h3>
-
-              {monthlyCommissions.length === 0 ? (
-                <div className="text-center py-12">
-                  <DatabaseIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 mb-2">No monthly commissions found</p>
-                  <p className="text-sm text-gray-400">
-                    Calculate monthly commissions from the Monthly Commissions tab
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Month</th>
-                        <th>Rep</th>
-                        <th>Customer</th>
-                        <th>Order #</th>
-                        <th>Account Type</th>
-                        <th>Segment</th>
-                        <th>Status</th>
-                        <th>Order Value</th>
-                        <th>Commission</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monthlyCommissions.map((comm) => (
-                        <tr key={comm.id}>
-                          <td className="font-medium">{comm.commissionMonth}</td>
-                          <td>{comm.repName}</td>
-                          <td className="text-sm">{comm.customerName}</td>
-                          <td className="text-sm">{comm.orderNum}</td>
-                          <td>
-                            <span className={`px-2 py-1 text-xs rounded-full ${
-                              comm.accountType === 'Distributor' ? 'bg-green-100 text-green-800' :
-                              comm.accountType === 'Wholesale' ? 'bg-blue-100 text-blue-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {comm.accountType}
-                            </span>
-                          </td>
-                          <td className="text-sm">{comm.customerSegment}</td>
-                          <td className="text-sm">{comm.customerStatus}</td>
-                          <td className="text-right">{formatCurrency(comm.orderValue)}</td>
-                          <td className="text-right font-semibold text-green-600">
-                            {formatCurrency(comm.commissionAmount)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Month/Year Selection Modal */}
@@ -3642,55 +3478,6 @@ export default function SettingsPage() {
         title="Calculate Monthly Commissions"
         description="Select the month and year to process Fishbowl sales orders"
       />
-
-      {/* Bulk Upload Modal */}
-      {showUploadModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Bulk Upload Commission Data</h2>
-            
-            <div className="mb-4">
-              <p className="text-sm text-gray-600 mb-2">
-                Upload a CSV file with the following columns:
-              </p>
-              <div className="bg-gray-50 p-3 rounded text-xs font-mono">
-                quarterId, repId, bucketCode, goalValue, actualValue, subGoalId (optional), notes (optional)
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select CSV File
-              </label>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const reader = new FileReader();
-                    reader.onload = async (event) => {
-                      const text = event.target?.result as string;
-                      await handleBulkUpload(text);
-                    };
-                    reader.readAsText(file);
-                  }
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              />
-            </div>
-
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={() => setShowUploadModal(false)}
-                className="btn btn-secondary"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Add/Edit User Modal */}
       {showAddUserModal && (

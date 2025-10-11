@@ -56,12 +56,15 @@ export async function POST(request: NextRequest) {
     const customersMap = new Map();
     customersSnapshot.forEach(doc => {
       const data = doc.data();
-      if (data.customerNum || data.customerId) {
-        const key = data.customerNum || data.customerId;
-        customersMap.set(key, { id: doc.id, ...data });
-      }
+      const customerData = { id: doc.id, ...data };
+      
+      // Map by multiple keys for flexibility
+      if (data.accountNumber) customersMap.set(data.accountNumber, customerData);
+      if (data.customerNum) customersMap.set(data.customerNum, customerData);
+      if (data.customerId) customersMap.set(data.customerId, customerData);
+      if (doc.id) customersMap.set(doc.id, customerData);
     });
-    console.log(`Loaded ${customersMap.size} customers with account types`);
+    console.log(`Loaded ${customersSnapshot.size} customers (${customersMap.size} keys) with account types`);
 
     // Get all users (sales reps) - map by salesPerson field
     // Use isCommissioned instead of role='sales' because some reps have role='admin'
@@ -124,38 +127,72 @@ export async function POST(request: NextRequest) {
     let commissionsCalculated = 0;
     let totalCommission = 0;
     const commissionsByRep = new Map();
+    const skippedReps = new Set();
+    let skippedCounts = {
+      admin: 0,
+      shopify: 0,
+      retail: 0,
+      inactiveRep: 0
+    };
 
     // Process each order
     for (const orderDoc of ordersSnapshot.docs) {
       const order = orderDoc.data();
       processed++;
 
-      // Get rep details
-      const rep = repsMap.get(order.salesPerson);
-      if (!rep || !rep.active) {
-        console.log(`Skipping order ${order.num} - rep ${order.salesPerson} not found or inactive`);
+      // Skip admin/house account orders (no commission)
+      if (order.salesPerson === 'admin' || order.salesPerson === 'Admin') {
+        skippedCounts.admin++;
         continue;
       }
 
-      // Get customer account type
-      const customer = customersMap.get(order.customerId) || customersMap.get(order.customerNum);
+      // Skip Commerce/Shopify orders (no commission on direct e-commerce)
+      if (order.salesPerson === 'Commerce' || order.salesPerson === 'commerce' || 
+          order.num?.startsWith('Sh') || order.orderNum?.startsWith('Sh')) {
+        skippedCounts.shopify++;
+        continue;
+      }
+
+      // Get rep details
+      const rep = repsMap.get(order.salesPerson);
+      if (!rep || !rep.active) {
+        skippedReps.add(order.salesPerson);
+        skippedCounts.inactiveRep++;
+        continue;
+      }
+
+      // Get customer account type - try multiple keys
+      const customer = customersMap.get(order.customerId) || 
+                      customersMap.get(order.customerNum) ||
+                      customersMap.get(order.accountNumber) ||
+                      customersMap.get(order.customerName);
       const accountType = customer?.accountType || 'Retail';
+      const manualTransferStatus = customer?.transferStatus; // Manual override from UI
       
       // Skip Retail accounts (no commission)
       if (accountType === 'Retail') {
-        console.log(`Skipping order ${order.num} - customer ${order.customerName} is Retail (no commission)`);
+        skippedCounts.retail++;
         continue;
       }
 
       // Get customer segment from Copper
       const customerSegment = await getCustomerSegment(order.customerId);
       
-      // Determine customer status
-      const customerStatus = await getCustomerStatus(
-        order.customerId,
-        order.salesPerson,
-        order.postingDate
-      );
+      // Determine customer status (check manual override first)
+      let customerStatus: string;
+      if (manualTransferStatus) {
+        // Manual override from UI takes precedence
+        customerStatus = manualTransferStatus; // 'own' or 'transferred'
+        console.log(`📌 Manual override for ${order.customerName}: ${manualTransferStatus}`);
+      } else {
+        // Auto-calculate based on order history
+        customerStatus = await getCustomerStatus(
+          order.customerId,
+          order.salesPerson,
+          order.postingDate,
+          commissionRules
+        );
+      }
 
       // Get commission rates for this rep's title
       const repCommissionRates = commissionRatesByTitle.get(rep.title);
@@ -197,6 +234,9 @@ export async function POST(request: NextRequest) {
 
       totalCommission += commissionAmount;
       commissionsCalculated++;
+
+      // Log successful commission calculation
+      console.log(`✅ COMMISSION CALCULATED: Order ${order.num} | ${rep.name} | ${customerSegment} | ${customerStatus} | $${orderAmount.toFixed(2)} × ${rate}% = $${commissionAmount.toFixed(2)}`);
 
       // Save commission record
       const commissionId = `${order.salesPerson}_${commissionMonth}_order_${order.salesOrderId}`;
@@ -263,6 +303,31 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Print summary
+    console.log('\n' + '='.repeat(80));
+    console.log('📊 COMMISSION CALCULATION SUMMARY');
+    console.log('='.repeat(80));
+    console.log(`✅ Commissions Calculated: ${commissionsCalculated}`);
+    console.log(`💰 Total Commission: $${totalCommission.toFixed(2)}`);
+    console.log(`\n📋 Orders Processed: ${processed}`);
+    console.log(`   ⚪ Admin/House: ${skippedCounts.admin}`);
+    console.log(`   ⚪ Shopify: ${skippedCounts.shopify}`);
+    console.log(`   ⚪ Retail: ${skippedCounts.retail}`);
+    console.log(`   ⚪ Inactive/Unknown Reps: ${skippedCounts.inactiveRep}`);
+    
+    if (skippedReps.size > 0) {
+      console.log(`\n⚠️  INACTIVE/UNKNOWN REPS WITH ORDERS:`);
+      skippedReps.forEach(rep => console.log(`   - ${rep}`));
+    }
+    
+    if (commissionsCalculated > 0) {
+      console.log(`\n💵 COMMISSIONS BY REP:`);
+      for (const [salesPerson, summary] of commissionsByRep.entries()) {
+        console.log(`   ${summary.repName} (${salesPerson}): ${summary.orders} orders = $${summary.commission.toFixed(2)}`);
+      }
+    }
+    console.log('='.repeat(80) + '\n');
+
     return NextResponse.json({
       success: true,
       processed: processed,
@@ -303,15 +368,22 @@ async function getCustomerSegment(customerId: string): Promise<string> {
 async function getCustomerStatus(
   customerId: string,
   currentSalesPerson: string,
-  orderDate: any
+  orderDate: any,
+  commissionRules?: any
 ): Promise<string> {
   try {
+    // Get reorg settings from commission rules
+    const applyReorgRule = commissionRules?.applyReorgRule ?? true;
+    const reorgDateStr = commissionRules?.reorgDate ?? '2025-07-01';
+    const REORG_DATE = new Date(reorgDateStr);
+    const currentOrderDate = orderDate.toDate ? orderDate.toDate() : new Date(orderDate);
+    
     // Get all previous orders for this customer
     const previousOrders = await adminDb.collection('fishbowl_sales_orders')
       .where('customerId', '==', customerId)
       .where('postingDate', '<', orderDate)
       .orderBy('postingDate', 'desc')
-      .limit(1)
+      .limit(10) // Get more orders to check for rep changes
       .get();
 
     if (previousOrders.empty) {
@@ -319,20 +391,49 @@ async function getCustomerStatus(
     }
 
     const lastOrder = previousOrders.docs[0].data();
+    const lastOrderDate = lastOrder.postingDate.toDate();
     
-    // Check for rep transfer
+    // Calculate months since last order
+    const monthsDiff = Math.floor((currentOrderDate - lastOrderDate) / (1000 * 60 * 60 * 24 * 30));
+
+    // Check if customer hasn't ordered in 12+ months (dormant/reactivated)
+    if (monthsDiff >= 12) {
+      return 'new'; // Reverted to new business
+    }
+
+    // REORG RULE: Check if this customer was transferred during the July 2025 reorg
+    if (applyReorgRule && currentOrderDate >= REORG_DATE) {
+      // Check if customer had ANY orders before the reorg date
+      let hadOrdersBeforeReorg = false;
+      let hadDifferentRepBeforeReorg = false;
+      
+      for (const orderDoc of previousOrders.docs) {
+        const order = orderDoc.data();
+        const orderDateCheck = order.postingDate.toDate();
+        
+        if (orderDateCheck < REORG_DATE) {
+          hadOrdersBeforeReorg = true;
+          // Check if this old order had a different rep
+          if (order.salesPerson !== currentSalesPerson) {
+            hadDifferentRepBeforeReorg = true;
+            break;
+          }
+        }
+      }
+      
+      // If customer existed before reorg AND had a different rep → "transferred" (2%)
+      if (hadOrdersBeforeReorg && hadDifferentRepBeforeReorg) {
+        return 'transferred';
+      }
+    }
+
+    // Check for rep transfer (non-reorg scenario)
     if (lastOrder.salesPerson !== currentSalesPerson) {
       return 'rep_transfer';
     }
 
-    // Calculate months since last order
-    const lastOrderDate = lastOrder.postingDate.toDate();
-    const currentOrderDate = orderDate.toDate();
-    const monthsDiff = Math.floor((currentOrderDate - lastOrderDate) / (1000 * 60 * 60 * 24 * 30));
-
-    if (monthsDiff >= 12) {
-      return 'new'; // Reverted to new
-    } else if (monthsDiff <= 6) {
+    // Same rep, check activity
+    if (monthsDiff <= 6) {
       return '6month';
     } else {
       return '12month';
@@ -344,7 +445,7 @@ async function getCustomerStatus(
 }
 
 /**
- * Get commission rate for given parameters
+ * Get commission rate for given parameters from saved commission rates
  */
 function getCommissionRate(
   commissionRates: any,
@@ -352,20 +453,55 @@ function getCommissionRate(
   segment: string,
   status: string
 ): number {
-  // For now, return default rates based on segment and status
-  // In Phase 4, we'll implement per-title rates from the UI
+  // Map status values to match what we save in the UI
+  const statusMap: { [key: string]: string } = {
+    'new': 'new_business',
+    'rep_transfer': 'new_business', // Old rep transfers use new business rate (8%)
+    'transferred': 'transferred', // July 2025 reorg transferred customers (2%)
+    'own': 'new_business', // Manual override: rep acquired customer themselves (8%)
+    '6month': '6_month_active',
+    '12month': '12_month_active'
+  };
   
+  const mappedStatus = statusMap[status] || status;
+  
+  // Map segment to segmentId
   const segmentLower = segment.toLowerCase();
-  
-  if (segmentLower.includes('distributor')) {
-    if (status === 'new' || status === 'rep_transfer') return 8.0;
-    if (status === '6month') return 5.0;
-    if (status === '12month') return 3.0;
-  } else if (segmentLower.includes('wholesale')) {
-    if (status === 'new' || status === 'rep_transfer') return 10.0;
-    if (status === '6month') return 7.0;
-    if (status === '12month') return 5.0;
+  let segmentId = 'distributor'; // default
+  if (segmentLower.includes('wholesale')) {
+    segmentId = 'wholesale';
   }
   
-  return 5.0; // Default fallback
+  // Look up rate in the rates array
+  if (commissionRates?.rates && Array.isArray(commissionRates.rates)) {
+    const rate = commissionRates.rates.find((r: any) => 
+      r.title === title && 
+      r.segmentId === segmentId && 
+      r.status === mappedStatus &&
+      r.active !== false // Only use active rates
+    );
+    
+    if (rate && typeof rate.percentage === 'number') {
+      console.log(`✅ Found rate: ${title} | ${segmentId} | ${mappedStatus} = ${rate.percentage}%`);
+      return rate.percentage;
+    }
+  }
+  
+  // Fallback to hardcoded defaults if no rate found
+  console.log(`⚠️ No rate found for ${title} | ${segmentId} | ${mappedStatus}, using defaults`);
+  
+  // Transferred customers always get 2% (July 2025 reorg rule)
+  if (mappedStatus === 'transferred') return 2.0;
+  
+  if (segmentId === 'distributor') {
+    if (mappedStatus === 'new_business') return 8.0;
+    if (mappedStatus === '6_month_active') return 5.0;
+    if (mappedStatus === '12_month_active') return 3.0;
+  } else if (segmentId === 'wholesale') {
+    if (mappedStatus === 'new_business') return 10.0;
+    if (mappedStatus === '6_month_active') return 7.0;
+    if (mappedStatus === '12_month_active') return 5.0;
+  }
+  
+  return 5.0; // Final fallback
 }
