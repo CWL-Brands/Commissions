@@ -119,7 +119,7 @@ export default function SettingsPage() {
   const [selectedRep, setSelectedRep] = useState('all');
   const [selectedAccountType, setSelectedAccountType] = useState('all');
   const [savingCustomer, setSavingCustomer] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'shippingCity' | 'shippingState'>('customerName');
+  const [sortField, setSortField] = useState<'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'originalOwner' | 'shippingCity' | 'shippingState'>('customerName');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [selectedCity, setSelectedCity] = useState('all');
   const [selectedState, setSelectedState] = useState('all');
