@@ -1057,7 +1057,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSort = (field: 'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'shippingCity' | 'shippingState') => {
+  const handleSort = (field: 'customerNum' | 'customerName' | 'accountType' | 'salesPerson' | 'originalOwner' | 'shippingCity' | 'shippingState') => {
     if (sortField === field) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
