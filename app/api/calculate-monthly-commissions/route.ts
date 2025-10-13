@@ -426,6 +426,7 @@ async function getCustomerStatus(
 
     // Check if customer hasn't ordered in 12+ months (dormant/reactivated)
     if (monthsSinceLastOrder >= 12) {
+      console.log(`💤 DORMANT ACCOUNT REACTIVATED: ${customer?.customerName || customerId} - Last order: ${lastOrderDate.toISOString().split('T')[0]} (${monthsSinceLastOrder} months ago) → NEW BUSINESS (8%)`);
       return 'new'; // Reverted to new business
     }
 
