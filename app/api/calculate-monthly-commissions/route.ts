@@ -408,11 +408,18 @@ async function getCustomerStatus(
     const lastOrder = previousOrders.docs[0].data();
     const lastOrderDate = lastOrder.postingDate.toDate();
     
-    // Calculate months since last order
-    const monthsDiff = Math.floor((currentOrderDate - lastOrderDate) / (1000 * 60 * 60 * 24 * 30));
+    // Get the FIRST order (oldest) to determine customer age
+    const firstOrder = previousOrders.docs[previousOrders.docs.length - 1].data();
+    const firstOrderDate = firstOrder.postingDate.toDate();
+    
+    // Calculate months since LAST order (for dormancy check)
+    const monthsSinceLastOrder = Math.floor((currentOrderDate - lastOrderDate) / (1000 * 60 * 60 * 24 * 30));
+    
+    // Calculate months since FIRST order (for customer age)
+    const customerAgeMonths = Math.floor((currentOrderDate - firstOrderDate) / (1000 * 60 * 60 * 24 * 30));
 
     // Check if customer hasn't ordered in 12+ months (dormant/reactivated)
-    if (monthsDiff >= 12) {
+    if (monthsSinceLastOrder >= 12) {
       return 'new'; // Reverted to new business
     }
 
@@ -458,11 +465,13 @@ async function getCustomerStatus(
       return 'rep_transfer';
     }
 
-    // Same rep, check activity
-    if (monthsDiff <= 6) {
-      return '6month';
+    // Same rep, check customer age (time since FIRST order)
+    if (customerAgeMonths <= 6) {
+      return 'new'; // Customer is 0-6 months old → New Business (8%)
+    } else if (customerAgeMonths <= 12) {
+      return '6month'; // Customer is 6-12 months old → 6 Month Active (4%)
     } else {
-      return '12month';
+      return '12month'; // Customer is 12+ months old → 12 Month Active (4%)
     }
   } catch (error) {
     console.error(`Error getting customer status for ${customerId}:`, error);
