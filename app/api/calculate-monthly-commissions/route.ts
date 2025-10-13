@@ -431,7 +431,8 @@ async function getCustomerStatus(
     }
 
     // REORG RULE: Check if this customer was transferred during the July 2025 reorg
-    if (applyReorgRule && currentOrderDate >= REORG_DATE) {
+    // BUT: Only apply transfer rate if customer is NOT in their first 6 months (new business period)
+    if (applyReorgRule && currentOrderDate >= REORG_DATE && customerAgeMonths > 6) {
       // Check if customer had ANY orders before the reorg date
       let hadOrdersBeforeReorg = false;
       let hadDifferentRepBeforeReorg = false;
