@@ -55,6 +55,29 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   const processedCustomers = new Set<string>();
   const processedOrders = new Set<string>();
   
+  // FIRST PASS: Aggregate order totals from line items
+  console.log('🔄 First pass: Aggregating order totals...');
+  const orderTotals = new Map<string, { revenue: number; orderValue: number; lineCount: number }>();
+  
+  for (const row of data) {
+    const salesOrderNum = String(row['Sales order Number'] || '');
+    if (!salesOrderNum) continue;
+    
+    const revenue = parseFloat(row['Revenue'] || 0);
+    const orderValue = parseFloat(row['Order value'] || 0);
+    
+    if (!orderTotals.has(salesOrderNum)) {
+      orderTotals.set(salesOrderNum, { revenue: 0, orderValue: 0, lineCount: 0 });
+    }
+    
+    const totals = orderTotals.get(salesOrderNum)!;
+    totals.revenue += revenue;
+    totals.orderValue += orderValue;
+    totals.lineCount++;
+  }
+  
+  console.log(`✅ Aggregated ${orderTotals.size} unique orders from ${data.length} line items`);
+  
   let batch = adminDb.batch();
   let batchCount = 0;
   
@@ -193,6 +216,9 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           }
         }
         
+        // Get aggregated totals for this order
+        const aggregatedTotals = orderTotals.get(String(salesOrderNum)) || { revenue: 0, orderValue: 0, lineCount: 0 };
+        
         const orderData: any = {
           id: orderDocId,  // fb_so_{Sales order Number}
           num: String(salesOrderNum),  // Sales Order Number (external customer-facing)
@@ -210,9 +236,10 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           commissionMonth: commissionMonth, // For grouping: "2025-10"
           commissionYear: commissionYear, // For filtering: 2025
           
-          // Financial totals
-          revenue: parseFloat(row['Revenue'] || 0),  // Total amount of Sales Order
-          orderValue: parseFloat(row['Order value'] || 0),  // Total amount of Sales Order
+          // Financial totals - USE AGGREGATED TOTALS FROM ALL LINE ITEMS
+          revenue: aggregatedTotals.revenue,  // SUM of all line items for this order
+          orderValue: aggregatedTotals.orderValue,  // SUM of all line items for this order
+          lineItemCount: aggregatedTotals.lineCount, // Number of line items
           
           updatedAt: Timestamp.now(),
           source: 'fishbowl_unified',
