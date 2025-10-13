@@ -328,11 +328,24 @@ export async function POST(request: NextRequest) {
     }
     console.log('='.repeat(80) + '\n');
 
+    // Format rep breakdown for UI
+    const repBreakdown: { [key: string]: any } = {};
+    for (const [salesPerson, summary] of commissionsByRep.entries()) {
+      repBreakdown[summary.repName] = {
+        salesPerson: salesPerson,
+        orders: summary.orders,
+        revenue: summary.revenue,
+        commission: summary.commission
+      };
+    }
+
     return NextResponse.json({
       success: true,
       processed: processed,
       commissionsCalculated: commissionsCalculated,
       totalCommission: totalCommission,
+      repBreakdown: repBreakdown,
+      skippedCounts: skippedCounts,
       summary: Object.fromEntries(commissionsByRep)
     });
 

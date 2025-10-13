@@ -26,7 +26,9 @@ import {
   ArrowUp,
   ArrowDown,
   Lock,
-  Map as MapIcon
+  Map as MapIcon,
+  DollarSign,
+  TrendingUp
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import RegionMap from './RegionMap';
@@ -132,6 +134,9 @@ export default function SettingsPage() {
   const [batchSalesRep, setBatchSalesRep] = useState('');
   const [batchTransferStatus, setBatchTransferStatus] = useState('');
   const [savingBatch, setSavingBatch] = useState(false);
+
+  // Commission Summary state
+  const [commissionSummary, setCommissionSummary] = useState<any>(null);
 
   // Fishbowl Import state
   const [fishbowlFile, setFishbowlFile] = useState<File | null>(null);
@@ -1252,6 +1257,18 @@ export default function SettingsPage() {
         throw new Error(data.error || 'Calculation failed');
       }
       
+      // Store summary data for display
+      setCommissionSummary({
+        month,
+        year,
+        commissionsCalculated: data.commissionsCalculated,
+        totalCommission: data.totalCommission,
+        ordersProcessed: data.processed,
+        repBreakdown: data.repBreakdown || {},
+        skippedCounts: data.skippedCounts || {},
+        calculatedAt: new Date().toISOString()
+      });
+
       // Show detailed success message
       if (data.commissionsCalculated > 0) {
         toast.success(
@@ -2178,6 +2195,128 @@ export default function SettingsPage() {
                 </button>
               </div>
             </div>
+
+            {/* Commission Summary Dashboard */}
+            {commissionSummary && (
+              <div className="card bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 border-2 border-indigo-200">
+                <div className="mb-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-2xl font-bold text-gray-900 flex items-center">
+                        📊 Commission Summary
+                        <span className="ml-3 text-sm font-normal text-gray-600">
+                          {commissionSummary.month} {commissionSummary.year}
+                        </span>
+                      </h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Calculated {new Date(commissionSummary.calculatedAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setCommissionSummary(null)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Key Metrics */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Total Commission</p>
+                        <p className="text-3xl font-bold text-green-600 mt-1">
+                          ${commissionSummary.totalCommission?.toFixed(2) || '0.00'}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                        <DollarSign className="w-6 h-6 text-green-600" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Commissions Calculated</p>
+                        <p className="text-3xl font-bold text-blue-600 mt-1">
+                          {commissionSummary.commissionsCalculated}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                        <TrendingUp className="w-6 h-6 text-blue-600" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Orders Processed</p>
+                        <p className="text-3xl font-bold text-purple-600 mt-1">
+                          {commissionSummary.ordersProcessed}
+                        </p>
+                      </div>
+                      <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+                        <Calendar className="w-6 h-6 text-purple-600" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rep Breakdown */}
+                {commissionSummary.repBreakdown && Object.keys(commissionSummary.repBreakdown).length > 0 && (
+                  <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                      <Users className="w-5 h-5 mr-2 text-indigo-600" />
+                      Commission by Rep
+                    </h4>
+                    <div className="space-y-3">
+                      {Object.entries(commissionSummary.repBreakdown).map(([repName, data]: [string, any]) => (
+                        <div key={repName} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                              <span className="text-sm font-bold text-indigo-600">
+                                {repName.split(' ').map(n => n[0]).join('')}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{repName}</p>
+                              <p className="text-sm text-gray-500">{data.orders} orders</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-green-600">
+                              ${data.commission?.toFixed(2) || '0.00'}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {((data.commission / commissionSummary.totalCommission) * 100).toFixed(1)}%
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Skipped Orders */}
+                {commissionSummary.skippedCounts && Object.keys(commissionSummary.skippedCounts).length > 0 && (
+                  <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200 mt-4">
+                    <h4 className="text-sm font-semibold text-yellow-900 mb-2">⚠️ Skipped Orders</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                      {Object.entries(commissionSummary.skippedCounts).map(([reason, count]) => (
+                        <div key={reason} className="flex justify-between">
+                          <span className="text-yellow-700 capitalize">{reason.replace(/([A-Z])/g, ' $1').trim()}:</span>
+                          <span className="font-semibold text-yellow-900">{count as number}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Commission Calculation Rules */}
             <div className="card">
