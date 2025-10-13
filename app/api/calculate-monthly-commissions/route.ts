@@ -393,12 +393,12 @@ async function getCustomerStatus(
     const REORG_DATE = new Date(reorgDateStr);
     const currentOrderDate = orderDate.toDate ? orderDate.toDate() : new Date(orderDate);
     
-    // Get all previous orders for this customer
+    // Get recent orders for rep change detection
     const previousOrders = await adminDb.collection('fishbowl_sales_orders')
       .where('customerId', '==', customerId)
       .where('postingDate', '<', orderDate)
       .orderBy('postingDate', 'desc')
-      .limit(10) // Get more orders to check for rep changes
+      .limit(10) // Get recent orders to check for rep changes
       .get();
 
     if (previousOrders.empty) {
@@ -408,8 +408,14 @@ async function getCustomerStatus(
     const lastOrder = previousOrders.docs[0].data();
     const lastOrderDate = lastOrder.postingDate.toDate();
     
-    // Get the FIRST order (oldest) to determine customer age
-    const firstOrder = previousOrders.docs[previousOrders.docs.length - 1].data();
+    // Get the ACTUAL FIRST order (oldest ever) to determine customer age
+    const firstOrderQuery = await adminDb.collection('fishbowl_sales_orders')
+      .where('customerId', '==', customerId)
+      .orderBy('postingDate', 'asc')
+      .limit(1)
+      .get();
+    
+    const firstOrder = firstOrderQuery.docs[0].data();
     const firstOrderDate = firstOrder.postingDate.toDate();
     
     // Calculate months since LAST order (for dormancy check)
@@ -466,11 +472,16 @@ async function getCustomerStatus(
     }
 
     // Same rep, check customer age (time since FIRST order)
+    console.log(`📅 Customer ${customerId}: First order ${firstOrderDate.toISOString().split('T')[0]}, Age: ${customerAgeMonths} months`);
+    
     if (customerAgeMonths <= 6) {
+      console.log(`   ✅ NEW (0-6 months old) → 8%`);
       return 'new'; // Customer is 0-6 months old → New Business (8%)
     } else if (customerAgeMonths <= 12) {
+      console.log(`   ⏱️ 6MONTH (6-12 months old) → 4%`);
       return '6month'; // Customer is 6-12 months old → 6 Month Active (4%)
     } else {
+      console.log(`   ⏱️ 12MONTH (12+ months old) → 4%`);
       return '12month'; // Customer is 12+ months old → 12 Month Active (4%)
     }
   } catch (error) {
