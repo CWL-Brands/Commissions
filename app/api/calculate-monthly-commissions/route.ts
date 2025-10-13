@@ -433,16 +433,9 @@ async function getCustomerStatus(
       return 'new'; // Reverted to new business
     }
 
-    // PRIORITY 1: Check customer age FIRST - New business (0-6 months) ALWAYS gets 8%
-    console.log(`📅 Customer ${customerId}: First order ${firstOrderDate.toISOString().split('T')[0]}, Age: ${customerAgeMonths} months`);
-    
-    if (customerAgeMonths <= 6) {
-      console.log(`   ✅ NEW (0-6 months old) → 8% (overrides any transfer status)`);
-      return 'new'; // Customer is 0-6 months old → New Business (8%)
-    }
-
-    // PRIORITY 2: REORG RULE - Check if customer was transferred during the July 2025 reorg
-    if (applyReorgRule && currentOrderDate >= REORG_DATE) {
+    // REORG RULE: Check if this customer was transferred during the July 2025 reorg
+    // BUT: Only apply transfer rate if customer is NOT in their first 6 months (new business period)
+    if (applyReorgRule && currentOrderDate >= REORG_DATE && customerAgeMonths > 6) {
       // Check if customer had ANY orders before the reorg date
       let hadOrdersBeforeReorg = false;
       let hadDifferentRepBeforeReorg = false;
@@ -478,13 +471,18 @@ async function getCustomerStatus(
       }
     }
 
-    // PRIORITY 3: Check for rep transfer (non-reorg scenario)
+    // Check for rep transfer (non-reorg scenario)
     if (lastOrder.salesPerson !== currentSalesPerson) {
       return 'rep_transfer';
     }
 
-    // PRIORITY 4: Same rep, check customer activity tier
-    if (customerAgeMonths <= 12) {
+    // Same rep, check customer age (time since FIRST order)
+    console.log(`📅 Customer ${customerId}: First order ${firstOrderDate.toISOString().split('T')[0]}, Age: ${customerAgeMonths} months`);
+    
+    if (customerAgeMonths <= 6) {
+      console.log(`   ✅ NEW (0-6 months old) → 8%`);
+      return 'new'; // Customer is 0-6 months old → New Business (8%)
+    } else if (customerAgeMonths <= 12) {
       console.log(`   ⏱️ 6MONTH (6-12 months old) → 4%`);
       return '6month'; // Customer is 6-12 months old → 6 Month Active (4%)
     } else {
