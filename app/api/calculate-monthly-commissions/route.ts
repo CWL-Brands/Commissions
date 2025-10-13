@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
+import { Timestamp } from 'firebase-admin/firestore';
+import Decimal from 'decimal.js';
 
 /**
  * Calculate monthly commissions from Fishbowl sales orders
@@ -218,19 +220,20 @@ export async function POST(request: NextRequest) {
       // Use orderValue or revenue based on rules
       const orderAmount = commissionRules?.useOrderValue ? (order.orderValue || order.revenue) : order.revenue;
 
-      // Calculate commission
+      // Calculate commission using Decimal.js for precision
       let commissionAmount = 0;
       if (customerStatus === 'rep_transfer') {
         const specialRule = repCommissionRates?.specialRules?.repTransfer;
         if (specialRule?.enabled) {
           const flatFee = specialRule.flatFee || 0;
-          const percentCommission = orderAmount * ((specialRule.percentFallback || 0) / 100);
+          const percentCommission = new Decimal(orderAmount).times(specialRule.percentFallback || 0).dividedBy(100).toNumber();
           commissionAmount = specialRule.useGreater 
             ? Math.max(flatFee, percentCommission)
             : flatFee;
         }
       } else {
-        commissionAmount = orderAmount * (rate / 100);
+        // Precise decimal calculation: orderAmount × (rate / 100)
+        commissionAmount = new Decimal(orderAmount).times(rate).dividedBy(100).toNumber();
       }
 
       totalCommission += commissionAmount;

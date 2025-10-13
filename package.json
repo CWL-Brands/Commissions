@@ -17,6 +17,7 @@
     "bfg": "^0.3.0",
     "copper-sdk": "^0.9.1",
     "date-fns": "^2.30.0",
+    "decimal.js": "^10.6.0",
     "firebase": "^11.10.0",
     "firebase-admin": "^11.11.1",
     "lucide-react": "^0.309.0",

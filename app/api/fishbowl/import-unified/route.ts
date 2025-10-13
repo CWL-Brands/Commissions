@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import * as XLSX from 'xlsx';
+import Decimal from 'decimal.js';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes
@@ -55,24 +56,24 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   const processedCustomers = new Set<string>();
   const processedOrders = new Set<string>();
   
-  // FIRST PASS: Aggregate order totals from line items
-  console.log('🔄 First pass: Aggregating order totals...');
-  const orderTotals = new Map<string, { revenue: number; orderValue: number; lineCount: number }>();
+  // FIRST PASS: Aggregate order totals from line items using Decimal.js for precision
+  console.log('🔄 First pass: Aggregating order totals with precise decimal math...');
+  const orderTotals = new Map<string, { revenue: Decimal; orderValue: Decimal; lineCount: number }>();
   
   for (const row of data) {
     const salesOrderNum = String(row['Sales order Number'] || '');
     if (!salesOrderNum) continue;
     
-    const revenue = parseFloat(row['Revenue'] || 0);
-    const orderValue = parseFloat(row['Order value'] || 0);
+    const revenue = new Decimal(row['Revenue'] || 0);
+    const orderValue = new Decimal(row['Order value'] || 0);
     
     if (!orderTotals.has(salesOrderNum)) {
-      orderTotals.set(salesOrderNum, { revenue: 0, orderValue: 0, lineCount: 0 });
+      orderTotals.set(salesOrderNum, { revenue: new Decimal(0), orderValue: new Decimal(0), lineCount: 0 });
     }
     
     const totals = orderTotals.get(salesOrderNum)!;
-    totals.revenue += revenue;
-    totals.orderValue += orderValue;
+    totals.revenue = totals.revenue.plus(revenue);
+    totals.orderValue = totals.orderValue.plus(orderValue);
     totals.lineCount++;
   }
   
@@ -216,8 +217,11 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           }
         }
         
-        // Get aggregated totals for this order
-        const aggregatedTotals = orderTotals.get(String(salesOrderNum)) || { revenue: 0, orderValue: 0, lineCount: 0 };
+        // Get aggregated totals for this order (convert Decimal to number for storage)
+        const aggregatedTotals = orderTotals.get(String(salesOrderNum));
+        const revenue = aggregatedTotals ? aggregatedTotals.revenue.toNumber() : 0;
+        const orderValue = aggregatedTotals ? aggregatedTotals.orderValue.toNumber() : 0;
+        const lineCount = aggregatedTotals ? aggregatedTotals.lineCount : 0;
         
         const orderData: any = {
           id: orderDocId,  // fb_so_{Sales order Number}
@@ -236,10 +240,10 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           commissionMonth: commissionMonth, // For grouping: "2025-10"
           commissionYear: commissionYear, // For filtering: 2025
           
-          // Financial totals - USE AGGREGATED TOTALS FROM ALL LINE ITEMS
-          revenue: aggregatedTotals.revenue,  // SUM of all line items for this order
-          orderValue: aggregatedTotals.orderValue,  // SUM of all line items for this order
-          lineItemCount: aggregatedTotals.lineCount, // Number of line items
+          // Financial totals - USE AGGREGATED TOTALS FROM ALL LINE ITEMS (precise decimal math)
+          revenue: revenue,  // SUM of all line items for this order
+          orderValue: orderValue,  // SUM of all line items for this order
+          lineItemCount: lineCount, // Number of line items
           
           updatedAt: Timestamp.now(),
           source: 'fishbowl_unified',
