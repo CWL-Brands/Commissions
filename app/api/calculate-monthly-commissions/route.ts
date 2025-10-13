@@ -185,12 +185,13 @@ export async function POST(request: NextRequest) {
         customerStatus = manualTransferStatus; // 'own' or 'transferred'
         console.log(`📌 Manual override for ${order.customerName}: ${manualTransferStatus}`);
       } else {
-        // Auto-calculate based on order history
+        // Auto-calculate based on order history AND customer assignment
         customerStatus = await getCustomerStatus(
           order.customerId,
           order.salesPerson,
           order.postingDate,
-          commissionRules
+          commissionRules,
+          customer // Pass customer object to check originalOwner
         );
       }
 
@@ -382,7 +383,8 @@ async function getCustomerStatus(
   customerId: string,
   currentSalesPerson: string,
   orderDate: any,
-  commissionRules?: any
+  commissionRules?: any,
+  customer?: any
 ): Promise<string> {
   try {
     // Get reorg settings from commission rules
@@ -434,7 +436,18 @@ async function getCustomerStatus(
         }
       }
       
-      // If customer existed before reorg AND had a different rep → "transferred" (2%)
+      // NEW: Also check if originalOwner (Fishbowl owner) differs from assigned rep
+      // This catches transfers that happened but may not show in order history
+      if (customer?.originalOwner && customer.originalOwner !== currentSalesPerson) {
+        // Customer exists and has a different original owner
+        // If they had orders before reorg, this is a transferred customer
+        if (hadOrdersBeforeReorg) {
+          console.log(`🔄 Transfer detected: ${customer.customerName || customerId} - Original: ${customer.originalOwner} → Current: ${currentSalesPerson}`);
+          return 'transferred';
+        }
+      }
+      
+      // If customer existed before reorg AND had a different rep in order history → "transferred" (2%)
       if (hadOrdersBeforeReorg && hadDifferentRepBeforeReorg) {
         return 'transferred';
       }
