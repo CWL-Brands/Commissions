@@ -3775,6 +3775,7 @@ export default function SettingsPage() {
                         </label>
                         <select name="region" defaultValue={editingUser?.region || ''} className="input w-full">
                           <option value="">None</option>
+                          <option value="HQ">HQ (Home Office)</option>
                           <option value="West">West</option>
                           <option value="East">East</option>
                           <option value="Central">Central</option>
