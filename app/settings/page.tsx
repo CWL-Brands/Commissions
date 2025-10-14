@@ -127,6 +127,11 @@ export default function SettingsPage() {
   const [selectedState, setSelectedState] = useState('all');
   const [confirmAdminChange, setConfirmAdminChange] = useState<{ customerId: string; newRep: string; customerName: string } | null>(null);
   
+  // Spiffs/Kickers state
+  const [spiffs, setSpiffs] = useState<any[]>([]);
+  const [showAddSpiffModal, setShowAddSpiffModal] = useState(false);
+  const [editingSpiff, setEditingSpiff] = useState<any>(null);
+  
   // Batch edit state
   const [batchEditMode, setBatchEditMode] = useState(false);
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
@@ -368,6 +373,92 @@ export default function SettingsPage() {
       loadRatesForTitle();
     }
   }, [selectedTitle, activeTab]);
+
+  // Load spiffs/kickers
+  useEffect(() => {
+    if (activeTab === 'monthly' && isAdmin) {
+      loadSpiffs();
+    }
+  }, [activeTab, isAdmin]);
+
+  const loadSpiffs = async () => {
+    try {
+      const spiffsSnapshot = await getDocs(collection(db, 'spiffs'));
+      const spiffsData = spiffsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSpiffs(spiffsData);
+    } catch (error) {
+      console.error('Error loading spiffs:', error);
+      toast.error('Failed to load spiffs');
+    }
+  };
+
+  const handleSaveSpiff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    
+    try {
+      const spiffData = {
+        name: formData.get('name'),
+        productNum: formData.get('productNum'),
+        productDescription: formData.get('productDescription'),
+        incentiveType: formData.get('incentiveType'),
+        incentiveValue: parseFloat(formData.get('incentiveValue') as string),
+        isActive: formData.get('isActive') === 'on',
+        startDate: formData.get('startDate'),
+        endDate: formData.get('endDate') || null,
+        notes: formData.get('notes') || '',
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (editingSpiff) {
+        await updateDoc(doc(db, 'spiffs', editingSpiff.id), spiffData);
+        toast.success('Spiff updated successfully!');
+      } else {
+        await addDoc(collection(db, 'spiffs'), {
+          ...spiffData,
+          createdAt: new Date().toISOString(),
+        });
+        toast.success('Spiff added successfully!');
+      }
+
+      setShowAddSpiffModal(false);
+      setEditingSpiff(null);
+      loadSpiffs();
+    } catch (error) {
+      console.error('Error saving spiff:', error);
+      toast.error('Failed to save spiff');
+    }
+  };
+
+  const handleDeleteSpiff = async (spiffId: string) => {
+    if (!confirm('Are you sure you want to delete this spiff/kicker?')) return;
+    
+    try {
+      await deleteDoc(doc(db, 'spiffs', spiffId));
+      toast.success('Spiff deleted successfully!');
+      loadSpiffs();
+    } catch (error) {
+      console.error('Error deleting spiff:', error);
+      toast.error('Failed to delete spiff');
+    }
+  };
+
+  const handleToggleSpiffActive = async (spiffId: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'spiffs', spiffId), {
+        isActive: !currentStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success(`Spiff ${!currentStatus ? 'activated' : 'deactivated'}!`);
+      loadSpiffs();
+    } catch (error) {
+      console.error('Error toggling spiff:', error);
+      toast.error('Failed to update spiff status');
+    }
+  };
 
   const addBucket = () => {
     const newBucket: CommissionBucket = {
@@ -2196,6 +2287,112 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* Spiffs/Kickers Management */}
+            <div className="card bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center">
+                    🎯 Spiffs & Kickers
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    Special sales incentives for specific products
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingSpiff(null);
+                    setShowAddSpiffModal(true);
+                  }}
+                  className="btn btn-primary flex items-center"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Spiff
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Active</th>
+                      <th>Name</th>
+                      <th>Product #</th>
+                      <th>Description</th>
+                      <th>Type</th>
+                      <th>Value</th>
+                      <th>Start Date</th>
+                      <th>End Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spiffs.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="text-center text-gray-500 py-8">
+                          No spiffs/kickers configured. Click &ldquo;Add Spiff&rdquo; to create one.
+                        </td>
+                      </tr>
+                    ) : (
+                      spiffs.map((spiff) => (
+                        <tr key={spiff.id} className={!spiff.isActive ? 'opacity-50' : ''}>
+                          <td>
+                            <button
+                              onClick={() => handleToggleSpiffActive(spiff.id, spiff.isActive)}
+                              className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                spiff.isActive
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}
+                            >
+                              {spiff.isActive ? '✓ Active' : '○ Inactive'}
+                            </button>
+                          </td>
+                          <td className="font-medium">{spiff.name}</td>
+                          <td className="text-sm font-mono">{spiff.productNum}</td>
+                          <td className="text-sm">{spiff.productDescription}</td>
+                          <td>
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              spiff.incentiveType === 'flat'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-purple-100 text-purple-800'
+                            }`}>
+                              {spiff.incentiveType === 'flat' ? 'Flat $' : 'Percentage %'}
+                            </span>
+                          </td>
+                          <td className="font-semibold text-green-600">
+                            {spiff.incentiveType === 'flat'
+                              ? `$${spiff.incentiveValue.toFixed(2)}`
+                              : `${spiff.incentiveValue}%`}
+                          </td>
+                          <td className="text-sm">{spiff.startDate}</td>
+                          <td className="text-sm">{spiff.endDate || 'Ongoing'}</td>
+                          <td>
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => {
+                                  setEditingSpiff(spiff);
+                                  setShowAddSpiffModal(true);
+                                }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSpiff(spiff.id)}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* Commission Summary Dashboard */}
             {commissionSummary && (
               <div className="card bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 border-2 border-indigo-200">
@@ -3618,6 +3815,193 @@ export default function SettingsPage() {
         title="Calculate Monthly Commissions"
         description="Select the month and year to process Fishbowl sales orders"
       />
+
+      {/* Add/Edit Spiff Modal */}
+      {showAddSpiffModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {editingSpiff ? 'Edit Spiff/Kicker' : 'Add New Spiff/Kicker'}
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowAddSpiffModal(false);
+                    setEditingSpiff(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveSpiff} className="space-y-6">
+                {/* Basic Info */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Spiff Name *
+                    </label>
+                    <input
+                      type="text"
+                      name="name"
+                      defaultValue={editingSpiff?.name || ''}
+                      required
+                      className="input w-full"
+                      placeholder="Q4 2025 Acrylic Kit Promotion"
+                    />
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Product Number *
+                      </label>
+                      <input
+                        type="text"
+                        name="productNum"
+                        defaultValue={editingSpiff?.productNum || ''}
+                        required
+                        className="input w-full"
+                        placeholder="KB-038"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Product Description
+                      </label>
+                      <input
+                        type="text"
+                        name="productDescription"
+                        defaultValue={editingSpiff?.productDescription || ''}
+                        className="input w-full"
+                        placeholder="Acrylic Kit - Black"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Incentive Type & Value */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Incentive Type *
+                      </label>
+                      <select
+                        name="incentiveType"
+                        defaultValue={editingSpiff?.incentiveType || 'flat'}
+                        required
+                        className="input w-full"
+                      >
+                        <option value="flat">Flat Dollar Amount</option>
+                        <option value="percentage">Percentage of Revenue</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Incentive Value *
+                      </label>
+                      <input
+                        type="number"
+                        name="incentiveValue"
+                        defaultValue={editingSpiff?.incentiveValue || ''}
+                        required
+                        step="0.01"
+                        min="0"
+                        className="input w-full"
+                        placeholder="16.00"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Enter dollar amount (e.g., 16.00) or percentage (e.g., 5.0)
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Date Range */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Start Date *
+                      </label>
+                      <input
+                        type="date"
+                        name="startDate"
+                        defaultValue={editingSpiff?.startDate || ''}
+                        required
+                        className="input w-full"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        End Date (Optional)
+                      </label>
+                      <input
+                        type="date"
+                        name="endDate"
+                        defaultValue={editingSpiff?.endDate || ''}
+                        className="input w-full"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Leave blank for ongoing incentive
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Active Status */}
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      name="isActive"
+                      id="isActive"
+                      defaultChecked={editingSpiff?.isActive !== false}
+                      className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
+                      Active (spiff is currently in effect)
+                    </label>
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Notes
+                    </label>
+                    <textarea
+                      name="notes"
+                      defaultValue={editingSpiff?.notes || ''}
+                      rows={3}
+                      className="input w-full"
+                      placeholder="Additional details about this spiff/kicker..."
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddSpiffModal(false);
+                      setEditingSpiff(null);
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    {editingSpiff ? 'Update Spiff' : 'Add Spiff'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit User Modal */}
       {showAddUserModal && (
