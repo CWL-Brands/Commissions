@@ -696,6 +696,20 @@ export default function SettingsPage() {
     }
   };
 
+  const handleToggleProductActive = async (productId: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'products', productId), {
+        isActive: !currentStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success(`Product ${!currentStatus ? 'activated' : 'deactivated'}!`);
+      loadProducts();
+    } catch (error) {
+      console.error('Error toggling product status:', error);
+      toast.error('Failed to update product status');
+    }
+  };
+
   const addBucket = () => {
     const newBucket: CommissionBucket = {
       id: `bucket_${Date.now()}`,
@@ -4274,13 +4288,17 @@ export default function SettingsPage() {
                           <td className="text-sm">{product.size || 'N/A'}</td>
                           <td className="text-sm font-mono">{product.uom || 'N/A'}</td>
                           <td>
-                            <span className={`px-2 py-1 text-xs rounded-full ${
-                              product.isActive
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {product.isActive ? 'Active' : 'Inactive'}
-                            </span>
+                            <button
+                              onClick={() => handleToggleProductActive(product.id, product.isActive)}
+                              className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+                                product.isActive
+                                  ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                  : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                              }`}
+                              title={`Click to ${product.isActive ? 'deactivate' : 'activate'}`}
+                            >
+                              {product.isActive ? '✓ Active' : '✗ Inactive'}
+                            </button>
                           </td>
                           <td>
                             {product.quarterlyBonusEligible ? (
