@@ -86,6 +86,7 @@ export default function ReportsPage() {
   const [monthlyViewMode, setMonthlyViewMode] = useState<'summary' | 'detailed'>('summary');
   const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set());
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
+  const [selectedRep, setSelectedRep] = useState<string>('all');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -159,7 +160,9 @@ export default function ReportsPage() {
       totalCommission: number;
     }>();
 
-    monthlyDetails.forEach((detail) => {
+    monthlyDetails
+      .filter(detail => selectedRep === 'all' || detail.repName === selectedRep)
+      .forEach((detail) => {
       if (!grouped.has(detail.customerName)) {
         grouped.set(detail.customerName, {
           customerName: detail.customerName,
@@ -739,7 +742,27 @@ export default function ReportsPage() {
 
                 {/* Monthly Summary Table */}
                 <div className="card mb-8">
-                  <h2 className="text-xl font-semibold text-gray-900 mb-4">Commission Summary</h2>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900">Commission Summary</h2>
+                    <div className="flex items-center space-x-2">
+                      <label className="text-sm font-medium text-gray-700">Filter by Rep:</label>
+                      <select
+                        value={selectedRep}
+                        onChange={(e) => setSelectedRep(e.target.value)}
+                        className="input"
+                      >
+                        <option value="all">All Reps</option>
+                        {monthlySummaries
+                          .filter(s => s.month === selectedMonth)
+                          .map(s => s.repName)
+                          .filter((name, index, self) => self.indexOf(name) === index)
+                          .sort()
+                          .map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="table">
                       <thead>
@@ -752,7 +775,10 @@ export default function ReportsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {monthlySummaries.filter(s => s.month === selectedMonth).map((summary) => (
+                        {monthlySummaries
+                          .filter(s => s.month === selectedMonth)
+                          .filter(s => selectedRep === 'all' || s.repName === selectedRep)
+                          .map((summary) => (
                           <tr key={summary.id}>
                             <td className="font-medium">{summary.repName}</td>
                             <td className="text-right">{summary.totalOrders}</td>
@@ -802,6 +828,7 @@ export default function ReportsPage() {
                           <tr>
                             <th>Order #</th>
                             <th>Customer</th>
+                            <th>Sales Rep</th>
                             <th>Segment</th>
                             <th>Status</th>
                             <th className="text-right">Revenue</th>
@@ -817,10 +844,13 @@ export default function ReportsPage() {
                               </td>
                             </tr>
                           ) : (
-                            monthlyDetails.map((detail) => (
+                            monthlyDetails
+                              .filter(detail => selectedRep === 'all' || detail.repName === selectedRep)
+                              .map((detail) => (
                               <tr key={detail.id}>
                                 <td className="text-sm font-medium">{detail.orderNum}</td>
                                 <td className="text-sm">{detail.customerName}</td>
+                                <td className="text-sm text-gray-600">{detail.repName}</td>
                                 <td>
                                   <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
                                     {detail.customerSegment}
@@ -865,6 +895,7 @@ export default function ReportsPage() {
                                   <div>
                                     <div className="flex items-center space-x-2">
                                       <h3 className="font-semibold text-gray-900">{customer.customerName}</h3>
+                                      <span className="text-xs text-gray-500">({customer.orders[0]?.repName})</span>
                                       {customer.accountType === 'Retail' && (
                                         <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-800 flex items-center">
                                           <AlertCircle className="w-3 h-3 mr-1" />
@@ -906,7 +937,7 @@ export default function ReportsPage() {
                                 <table className="w-full">
                                   <thead className="bg-gray-100 border-t border-gray-200">
                                     <tr>
-                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">Order #</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">SO #</th>
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">Date</th>
                                       <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">Revenue</th>
                                       <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">Rate</th>
