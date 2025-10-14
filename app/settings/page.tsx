@@ -141,7 +141,7 @@ export default function SettingsPage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedProductType, setSelectedProductType] = useState('all');
   const [selectedProductStatus, setSelectedProductStatus] = useState('all');
-  const [productSortField, setProductSortField] = useState<'productNum' | 'productDescription' | 'category' | 'productType'>('productNum');
+  const [productSortField, setProductSortField] = useState<'productNum' | 'productDescription' | 'category' | 'productType' | 'isActive'>('productNum');
   const [productSortDirection, setProductSortDirection] = useState<'asc' | 'desc'>('asc');
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
@@ -567,8 +567,19 @@ export default function SettingsPage() {
 
     // Apply sorting
     filtered.sort((a, b) => {
-      let aVal = a[productSortField] || '';
-      let bVal = b[productSortField] || '';
+      let aVal = a[productSortField];
+      let bVal = b[productSortField];
+      
+      // Special handling for isActive (boolean) - Active first when ascending
+      if (productSortField === 'isActive') {
+        const aActive = aVal === true ? 1 : 0;
+        const bActive = bVal === true ? 1 : 0;
+        return productSortDirection === 'asc' ? bActive - aActive : aActive - bActive;
+      }
+      
+      // Handle null/undefined
+      aVal = aVal || '';
+      bVal = bVal || '';
       
       if (typeof aVal === 'string') aVal = aVal.toLowerCase();
       if (typeof bVal === 'string') bVal = bVal.toLowerCase();
@@ -4236,6 +4247,7 @@ export default function SettingsPage() {
                       <option value="productDescription">Description</option>
                       <option value="category">Category</option>
                       <option value="productType">Type</option>
+                      <option value="isActive">Status</option>
                     </select>
                     <button
                       onClick={() => setProductSortDirection(productSortDirection === 'asc' ? 'desc' : 'asc')}
