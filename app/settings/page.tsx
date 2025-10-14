@@ -136,6 +136,11 @@ export default function SettingsPage() {
   const [allProducts, setAllProducts] = useState<any[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedProductType, setSelectedProductType] = useState('all');
+  const [selectedProductStatus, setSelectedProductStatus] = useState('all');
+  const [productSortField, setProductSortField] = useState<'productNum' | 'productDescription' | 'category' | 'productType'>('productNum');
+  const [productSortDirection, setProductSortDirection] = useState<'asc' | 'desc'>('asc');
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
   const [productFile, setProductFile] = useState<File | null>(null);
@@ -496,21 +501,56 @@ export default function SettingsPage() {
     }
   };
 
-  // Filter products by search term
+  // Filter and sort products
   useEffect(() => {
-    if (!productSearchTerm) {
-      setFilteredProducts(allProducts);
-      return;
+    let filtered = [...allProducts];
+
+    // Apply search filter
+    if (productSearchTerm) {
+      const term = productSearchTerm.toLowerCase();
+      filtered = filtered.filter(product =>
+        product.productNum?.toLowerCase().includes(term) ||
+        product.productDescription?.toLowerCase().includes(term) ||
+        product.category?.toLowerCase().includes(term)
+      );
     }
 
-    const term = productSearchTerm.toLowerCase();
-    const filtered = allProducts.filter(product =>
-      product.productNum?.toLowerCase().includes(term) ||
-      product.productDescription?.toLowerCase().includes(term) ||
-      product.category?.toLowerCase().includes(term)
-    );
+    // Apply category filter
+    if (selectedCategory !== 'all') {
+      filtered = filtered.filter(product => product.category === selectedCategory);
+    }
+
+    // Apply product type filter
+    if (selectedProductType !== 'all') {
+      filtered = filtered.filter(product => product.productType === selectedProductType);
+    }
+
+    // Apply status filter
+    if (selectedProductStatus !== 'all') {
+      if (selectedProductStatus === 'active') {
+        filtered = filtered.filter(product => product.isActive === true);
+      } else if (selectedProductStatus === 'inactive') {
+        filtered = filtered.filter(product => product.isActive === false);
+      } else if (selectedProductStatus === 'quarterlyBonus') {
+        filtered = filtered.filter(product => product.quarterlyBonusEligible === true);
+      }
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      let aVal = a[productSortField] || '';
+      let bVal = b[productSortField] || '';
+      
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+      
+      if (aVal < bVal) return productSortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return productSortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
     setFilteredProducts(filtered);
-  }, [productSearchTerm, allProducts]);
+  }, [productSearchTerm, allProducts, selectedCategory, selectedProductType, selectedProductStatus, productSortField, productSortDirection]);
 
   const handleImportProducts = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -4051,7 +4091,7 @@ export default function SettingsPage() {
               </div>
 
               {/* Search */}
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 mb-4">
                 <Search className="w-5 h-5 text-gray-400" />
                 <input
                   type="text"
@@ -4062,9 +4102,100 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="mt-4 text-sm text-gray-600">
-                <strong>{filteredProducts.length}</strong> products
+              {/* Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    <Filter className="w-3 h-3 inline mr-1" />
+                    Category
+                  </label>
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="input w-full text-sm"
+                  >
+                    <option value="all">All Categories</option>
+                    {Array.from(new Set(allProducts.map(p => p.category).filter(Boolean)))
+                      .sort()
+                      .map(category => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    <Filter className="w-3 h-3 inline mr-1" />
+                    Product Type
+                  </label>
+                  <select
+                    value={selectedProductType}
+                    onChange={(e) => setSelectedProductType(e.target.value)}
+                    className="input w-full text-sm"
+                  >
+                    <option value="all">All Types</option>
+                    {Array.from(new Set(allProducts.map(p => p.productType).filter(Boolean)))
+                      .sort()
+                      .map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    <Filter className="w-3 h-3 inline mr-1" />
+                    Status
+                  </label>
+                  <select
+                    value={selectedProductStatus}
+                    onChange={(e) => setSelectedProductStatus(e.target.value)}
+                    className="input w-full text-sm"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active Only</option>
+                    <option value="inactive">Inactive Only</option>
+                    <option value="quarterlyBonus">Quarterly Bonus Eligible</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    <ArrowUpDown className="w-3 h-3 inline mr-1" />
+                    Sort By
+                  </label>
+                  <div className="flex space-x-2">
+                    <select
+                      value={productSortField}
+                      onChange={(e) => setProductSortField(e.target.value as any)}
+                      className="input w-full text-sm"
+                    >
+                      <option value="productNum">Product #</option>
+                      <option value="productDescription">Description</option>
+                      <option value="category">Category</option>
+                      <option value="productType">Type</option>
+                    </select>
+                    <button
+                      onClick={() => setProductSortDirection(productSortDirection === 'asc' ? 'desc' : 'asc')}
+                      className="btn btn-secondary px-3"
+                      title={`Sort ${productSortDirection === 'asc' ? 'Descending' : 'Ascending'}`}
+                    >
+                      {productSortDirection === 'asc' ? (
+                        <ArrowUp className="w-4 h-4" />
+                      ) : (
+                        <ArrowDown className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-sm text-gray-600">
+                <strong>{filteredProducts.length}</strong> of <strong>{allProducts.length}</strong> products
                 {productSearchTerm && ` matching "${productSearchTerm}"`}
+                {selectedCategory !== 'all' && ` • Category: ${selectedCategory}`}
+                {selectedProductType !== 'all' && ` • Type: ${selectedProductType}`}
+                {selectedProductStatus !== 'all' && ` • Status: ${selectedProductStatus}`}
               </div>
             </div>
 
