@@ -64,6 +64,18 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
     const salesOrderNum = String(row['Sales order Number'] || '');
     if (!salesOrderNum) continue;
     
+    // Exclude shipping and CC processing fees from commission calculations
+    const productDescription = String(row['Sales Order Item Description'] || '').toLowerCase();
+    const isShipping = productDescription.includes('shipping');
+    const isCCProcessing = productDescription.includes('cc processing') || 
+                          productDescription.includes('credit card processing');
+    
+    // Skip this line item if it's shipping or CC processing
+    if (isShipping || isCCProcessing) {
+      console.log(`⏭️  Excluding from totals: ${row['Sales Order Item Description']} (Order ${salesOrderNum})`);
+      continue;
+    }
+    
     const revenue = new Decimal(row['Revenue'] || 0);
     const orderValue = new Decimal(row['Order value'] || 0);
     

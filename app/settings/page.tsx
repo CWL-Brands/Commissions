@@ -101,6 +101,7 @@ export default function SettingsPage() {
   // Commission calculation rules
   const [commissionRules, setCommissionRules] = useState({
     excludeShipping: true,
+    excludeCCProcessing: true, // Exclude credit card processing fees
     useOrderValue: true,
     applyReorgRule: true, // July 2025 reorg - transferred customers get 2%
     reorgDate: '2025-07-01', // Date of the reorg
@@ -2808,6 +2809,23 @@ export default function SettingsPage() {
                     <span className="text-sm font-medium text-gray-900">Exclude Shipping from Commissions</span>
                     <p className="text-sm text-gray-500 mt-1">
                       Line items with Product = &quot;Shipping&quot; will not count toward commission calculations
+                    </p>
+                  </label>
+                </div>
+
+                {/* Exclude CC Processing */}
+                <div className="flex items-start p-4 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="excludeCCProcessing"
+                    checked={commissionRules.excludeCCProcessing}
+                    onChange={(e) => setCommissionRules({...commissionRules, excludeCCProcessing: e.target.checked})}
+                    className="mt-1 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="excludeCCProcessing" className="ml-3 flex-1">
+                    <span className="text-sm font-medium text-gray-900">Exclude Credit Card Processing Fees from Commissions</span>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Line items with Product = &quot;CC Processing&quot; or &quot;Credit Card Processing Fee&quot; will not count toward commission calculations
                     </p>
                   </label>
                 </div>
