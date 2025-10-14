@@ -1698,6 +1698,16 @@ export default function SettingsPage() {
             >
               Org Chart
             </button>
+            <button
+              onClick={() => setActiveTab('products')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                activeTab === 'products'
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Products
+            </button>
           </nav>
         </div>
       </div>
@@ -3997,6 +4007,182 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* Products Tab */}
+        {activeTab === 'products' && (
+          <div className="space-y-8">
+            {/* Header */}
+            <div className="card bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+                    📦 Product Management
+                  </h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Manage product catalog for spiffs and quarterly bonuses
+                  </p>
+                </div>
+                <div className="flex space-x-3">
+                  <label className="btn btn-secondary flex items-center cursor-pointer">
+                    <Upload className="w-4 h-4 mr-2" />
+                    {importingProducts ? 'Importing...' : 'Import CSV'}
+                    <input
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      onChange={handleImportProducts}
+                      disabled={importingProducts}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    onClick={() => {
+                      setEditingProduct(null);
+                      setShowAddProductModal(true);
+                    }}
+                    className="btn btn-primary flex items-center"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Product
+                  </button>
+                </div>
+              </div>
+
+              {/* Search */}
+              <div className="flex items-center space-x-2">
+                <Search className="w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search by product number, description, or category..."
+                  value={productSearchTerm}
+                  onChange={(e) => setProductSearchTerm(e.target.value)}
+                  className="input flex-1"
+                />
+              </div>
+
+              <div className="mt-4 text-sm text-gray-600">
+                <strong>{filteredProducts.length}</strong> products
+                {productSearchTerm && ` matching "${productSearchTerm}"`}
+              </div>
+            </div>
+
+            {/* Products Table */}
+            <div className="card">
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Image</th>
+                      <th>Product #</th>
+                      <th>Description</th>
+                      <th>Category</th>
+                      <th>Type</th>
+                      <th>Size</th>
+                      <th>UOM</th>
+                      <th>Status</th>
+                      <th>Quarterly Bonus</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="text-center text-gray-500 py-8">
+                          {productSearchTerm ? 'No products found matching your search.' : 'No products yet. Import from CSV or add manually.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredProducts.map((product) => (
+                        <tr key={product.id}>
+                          <td>
+                            {product.imageUrl ? (
+                              <div className="relative group">
+                                <img
+                                  src={product.imageUrl}
+                                  alt={product.productDescription}
+                                  className="w-16 h-16 object-cover rounded border"
+                                />
+                                <button
+                                  onClick={() => handleDeleteProductImage(product.id, product.imagePath)}
+                                  className="absolute top-0 right-0 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Delete image"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ) : (
+                              <label className="w-16 h-16 border-2 border-dashed border-gray-300 rounded flex items-center justify-center cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-colors">
+                                <Upload className="w-6 h-6 text-gray-400" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      handleUploadProductImage(product.id, product.productNum, file);
+                                    }
+                                  }}
+                                  className="hidden"
+                                  disabled={uploadingImage}
+                                />
+                              </label>
+                            )}
+                          </td>
+                          <td className="font-mono font-semibold">{product.productNum}</td>
+                          <td className="max-w-xs truncate">{product.productDescription}</td>
+                          <td>
+                            <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                              {product.category || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="text-sm">{product.productType || 'N/A'}</td>
+                          <td className="text-sm">{product.size || 'N/A'}</td>
+                          <td className="text-sm font-mono">{product.uom || 'N/A'}</td>
+                          <td>
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              product.isActive
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {product.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                          <td>
+                            {product.quarterlyBonusEligible ? (
+                              <CheckCircle className="w-5 h-5 text-green-600" />
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => {
+                                  setEditingProduct(product);
+                                  setShowAddProductModal(true);
+                                }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteProduct(product.id)}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Month/Year Selection Modal */}
@@ -4187,6 +4373,183 @@ export default function SettingsPage() {
                   </button>
                   <button type="submit" className="btn btn-primary">
                     {editingSpiff ? 'Update Spiff' : 'Add Spiff'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit Product Modal */}
+      {showAddProductModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {editingProduct ? 'Edit Product' : 'Add New Product'}
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowAddProductModal(false);
+                    setEditingProduct(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveProduct} className="space-y-6">
+                {/* Product Number & Description */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product Number *
+                    </label>
+                    <input
+                      type="text"
+                      name="productNum"
+                      defaultValue={editingProduct?.productNum || ''}
+                      required
+                      className="input w-full"
+                      placeholder="KB-038"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product Description *
+                    </label>
+                    <input
+                      type="text"
+                      name="productDescription"
+                      defaultValue={editingProduct?.productDescription || ''}
+                      required
+                      className="input w-full"
+                      placeholder="Acrylic Kit - Black"
+                    />
+                  </div>
+                </div>
+
+                {/* Category & Type */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Category
+                    </label>
+                    <input
+                      type="text"
+                      name="category"
+                      defaultValue={editingProduct?.category || ''}
+                      className="input w-full"
+                      placeholder="Kit"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product Type
+                    </label>
+                    <input
+                      type="text"
+                      name="productType"
+                      defaultValue={editingProduct?.productType || ''}
+                      className="input w-full"
+                      placeholder="Acrylic"
+                    />
+                  </div>
+                </div>
+
+                {/* Size & UOM */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Size
+                    </label>
+                    <input
+                      type="text"
+                      name="size"
+                      defaultValue={editingProduct?.size || ''}
+                      className="input w-full"
+                      placeholder="Mixed"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Unit of Measure (UOM)
+                    </label>
+                    <input
+                      type="text"
+                      name="uom"
+                      defaultValue={editingProduct?.uom || ''}
+                      className="input w-full"
+                      placeholder="EA, CS, KT"
+                    />
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Notes
+                  </label>
+                  <textarea
+                    name="notes"
+                    defaultValue={editingProduct?.notes || ''}
+                    rows={3}
+                    className="input w-full"
+                    placeholder="Additional product details..."
+                  />
+                </div>
+
+                {/* Checkboxes */}
+                <div className="space-y-3">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      name="isActive"
+                      id="productIsActive"
+                      defaultChecked={editingProduct?.isActive !== false}
+                      className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="productIsActive" className="ml-2 block text-sm text-gray-900">
+                      Active (product is available)
+                    </label>
+                  </div>
+
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      name="quarterlyBonusEligible"
+                      id="quarterlyBonusEligible"
+                      defaultChecked={editingProduct?.quarterlyBonusEligible === true}
+                      className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="quarterlyBonusEligible" className="ml-2 block text-sm text-gray-900">
+                      Eligible for Quarterly Bonus
+                    </label>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddProductModal(false);
+                      setEditingProduct(null);
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    {editingProduct ? 'Update Product' : 'Add Product'}
                   </button>
                 </div>
               </form>
