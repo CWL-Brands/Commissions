@@ -4220,13 +4220,13 @@ export default function SettingsPage() {
                   <thead>
                     <tr>
                       <th>Image</th>
+                      <th>Status</th>
                       <th>Product #</th>
                       <th>Description</th>
                       <th>Category</th>
                       <th>Type</th>
                       <th>Size</th>
                       <th>UOM</th>
-                      <th>Status</th>
                       <th>Quarterly Bonus</th>
                       <th>Actions</th>
                     </tr>
@@ -4277,16 +4277,6 @@ export default function SettingsPage() {
                               </label>
                             )}
                           </td>
-                          <td className="font-mono font-semibold">{product.productNum}</td>
-                          <td className="max-w-xs truncate">{product.productDescription}</td>
-                          <td>
-                            <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
-                              {product.category || 'N/A'}
-                            </span>
-                          </td>
-                          <td className="text-sm">{product.productType || 'N/A'}</td>
-                          <td className="text-sm">{product.size || 'N/A'}</td>
-                          <td className="text-sm font-mono">{product.uom || 'N/A'}</td>
                           <td>
                             <button
                               onClick={() => handleToggleProductActive(product.id, product.isActive)}
@@ -4300,6 +4290,16 @@ export default function SettingsPage() {
                               {product.isActive ? '✓ Active' : '✗ Inactive'}
                             </button>
                           </td>
+                          <td className="font-mono font-semibold">{product.productNum}</td>
+                          <td className="max-w-xs truncate">{product.productDescription}</td>
+                          <td>
+                            <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                              {product.category || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="text-sm">{product.productType || 'N/A'}</td>
+                          <td className="text-sm">{product.size || 'N/A'}</td>
+                          <td className="text-sm font-mono">{product.uom || 'N/A'}</td>
                           <td>
                             {product.quarterlyBonusEligible ? (
                               <CheckCircle className="w-5 h-5 text-green-600" />
