@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth } from '@/lib/firebase/config';
+import { auth, db } from '@/lib/firebase/config';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 import { Calculator, Mail, Lock, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -50,7 +51,22 @@ export default function LoginPage() {
 
     try {
       if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        
+        // Create user document in Firestore
+        const userDoc = {
+          id: userCredential.user.uid,
+          email: email,
+          name: email.split('@')[0], // Use email prefix as default name
+          role: 'sales', // Default role
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        
+        await setDoc(doc(db, 'users', userCredential.user.uid), userDoc);
+        console.log('✅ User document created:', userDoc);
+        
         toast.success('Account created successfully!');
       } else {
         await signInWithEmailAndPassword(auth, email, password);
