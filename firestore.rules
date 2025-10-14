@@ -117,6 +117,66 @@ service cloud.firestore {
       allow write: if true;
     }
     
+    // Copper leads (internal app - permissive)
+    match /copper_leads/{leadId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Copper opportunities (internal app - permissive)
+    match /copper_opportunities/{opportunityId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Copper tasks (internal app - permissive)
+    match /copper_tasks/{taskId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Copper logs (internal app - permissive)
+    match /copperLogs/{logId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Copper summaries (internal app - permissive)
+    match /copperSummaries/{summaryId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Customers collection (internal app - permissive)
+    match /customers/{customerId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Commission config (internal app - permissive)
+    match /commission_config/{configId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Commission rates (internal app - permissive)
+    match /commission_rates/{rateId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Import logs (internal app - permissive)
+    match /import_logs/{logId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Sync log (internal app - permissive)
+    match /sync_log/{logId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
     // ========== EXISTING RULES (FROM YOUR CONSOLE) ==========
     
     // Products collection - public read, admin write
@@ -188,18 +248,28 @@ service cloud.firestore {
       allow read: if request.auth != null || isEmulator();
     }
     
-    // Goals - users can manage and read only their own goals
+    // Goals - internal app - permissive for admin access
     match /goals/{goalId} {
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow write: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+      allow read: if true;
+      allow write: if true;
     }
     
-    // Metrics - users can write and read only their own
+    // Metrics - internal app - permissive for admin access
     match /metrics/{metricId} {
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Spiffs/Kickers - internal app - permissive for admin access
+    match /spiffs/{spiffId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Spiff earnings - internal app - permissive for admin access
+    match /spiff_earnings/{earningId} {
+      allow read: if true;
+      allow write: if true;
     }
     
     // Organization settings
