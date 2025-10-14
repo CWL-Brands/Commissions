@@ -132,6 +132,7 @@ export default function SettingsPage() {
   const [spiffs, setSpiffs] = useState<any[]>([]);
   const [showAddSpiffModal, setShowAddSpiffModal] = useState(false);
   const [editingSpiff, setEditingSpiff] = useState<any>(null);
+  const [selectedSpiffProducts, setSelectedSpiffProducts] = useState<string[]>([]);
   
   // Products state
   const [allProducts, setAllProducts] = useState<any[]>([]);
@@ -426,11 +427,14 @@ export default function SettingsPage() {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
     
+    if (selectedSpiffProducts.length === 0) {
+      toast.error('Please select at least one product');
+      return;
+    }
+    
     try {
-      const spiffData = {
+      const baseSpiffData = {
         name: formData.get('name'),
-        productNum: formData.get('productNum'),
-        productDescription: formData.get('productDescription'),
         incentiveType: formData.get('incentiveType'),
         incentiveValue: parseFloat(formData.get('incentiveValue') as string),
         isActive: formData.get('isActive') === 'on',
@@ -441,18 +445,35 @@ export default function SettingsPage() {
       };
 
       if (editingSpiff) {
-        await updateDoc(doc(db, 'spiffs', editingSpiff.id), spiffData);
+        // When editing, update the single spiff
+        const product = allProducts.find(p => p.productNum === selectedSpiffProducts[0]);
+        await updateDoc(doc(db, 'spiffs', editingSpiff.id), {
+          ...baseSpiffData,
+          productNum: selectedSpiffProducts[0],
+          productDescription: product?.productDescription || '',
+        });
         toast.success('Spiff updated successfully!');
       } else {
-        await addDoc(collection(db, 'spiffs'), {
-          ...spiffData,
-          createdAt: new Date().toISOString(),
-        });
-        toast.success('Spiff added successfully!');
+        // When creating, create one spiff per selected product
+        const batch = [];
+        for (const productNum of selectedSpiffProducts) {
+          const product = allProducts.find(p => p.productNum === productNum);
+          batch.push(
+            addDoc(collection(db, 'spiffs'), {
+              ...baseSpiffData,
+              productNum: productNum,
+              productDescription: product?.productDescription || '',
+              createdAt: new Date().toISOString(),
+            })
+          );
+        }
+        await Promise.all(batch);
+        toast.success(`${selectedSpiffProducts.length} spiff(s) added successfully!`);
       }
 
       setShowAddSpiffModal(false);
       setEditingSpiff(null);
+      setSelectedSpiffProducts([]);
       loadSpiffs();
     } catch (error) {
       console.error('Error saving spiff:', error);
@@ -2569,6 +2590,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => {
                     setEditingSpiff(null);
+                    setSelectedSpiffProducts([]);
                     setShowAddSpiffModal(true);
                   }}
                   className="btn btn-primary flex items-center"
@@ -2639,6 +2661,7 @@ export default function SettingsPage() {
                               <button
                                 onClick={() => {
                                   setEditingSpiff(spiff);
+                                  setSelectedSpiffProducts([spiff.productNum]);
                                   setShowAddSpiffModal(true);
                                 }}
                                 className="text-blue-600 hover:text-blue-800"
@@ -4411,57 +4434,49 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Product *
-                      </label>
-                      <select
-                        name="productNum"
-                        defaultValue={editingSpiff?.productNum || ''}
-                        required
-                        className="input w-full"
-                        onChange={(e) => {
-                          const selectedProduct = allProducts.find(p => p.productNum === e.target.value);
-                          if (selectedProduct) {
-                            const descInput = document.querySelector('input[name="productDescription"]') as HTMLInputElement;
-                            if (descInput) {
-                              descInput.value = selectedProduct.productDescription || '';
-                            }
-                          }
-                        }}
-                      >
-                        <option value="">Select a product...</option>
-                        {allProducts
-                          .filter(p => p.isActive)
-                          .sort((a, b) => a.productNum.localeCompare(b.productNum))
-                          .map(product => (
-                            <option key={product.id} value={product.productNum}>
-                              {product.productNum} - {product.productDescription}
-                            </option>
-                          ))}
-                      </select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Select from active products. Manage products in the Products tab.
-                      </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Products * {editingSpiff ? '(Single product when editing)' : '(Select multiple products)'}
+                    </label>
+                    <div className="border border-gray-300 rounded-md p-3 max-h-64 overflow-y-auto bg-white">
+                      {allProducts
+                        .filter(p => p.isActive)
+                        .sort((a, b) => a.productNum.localeCompare(b.productNum))
+                        .map(product => (
+                          <label key={product.id} className="flex items-center py-2 hover:bg-gray-50 px-2 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedSpiffProducts.includes(product.productNum)}
+                              onChange={(e) => {
+                                if (editingSpiff) {
+                                  // When editing, only allow single selection
+                                  setSelectedSpiffProducts([product.productNum]);
+                                } else {
+                                  // When creating, allow multiple
+                                  if (e.target.checked) {
+                                    setSelectedSpiffProducts([...selectedSpiffProducts, product.productNum]);
+                                  } else {
+                                    setSelectedSpiffProducts(selectedSpiffProducts.filter(p => p !== product.productNum));
+                                  }
+                                }
+                              }}
+                              className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                              disabled={editingSpiff && selectedSpiffProducts.length > 0 && !selectedSpiffProducts.includes(product.productNum)}
+                            />
+                            <span className="ml-3 text-sm">
+                              <span className="font-mono font-semibold">{product.productNum}</span>
+                              {' - '}
+                              <span className="text-gray-600">{product.productDescription}</span>
+                            </span>
+                          </label>
+                        ))}
                     </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Product Description
-                      </label>
-                      <input
-                        type="text"
-                        name="productDescription"
-                        defaultValue={editingSpiff?.productDescription || ''}
-                        className="input w-full bg-gray-50"
-                        placeholder="Auto-filled from product"
-                        readOnly
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Auto-filled when product is selected
-                      </p>
-                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      {editingSpiff 
+                        ? 'When editing, you can only change to a different single product.'
+                        : `Selected: ${selectedSpiffProducts.length} product(s). One spiff will be created per product with the same settings.`
+                      }
+                    </p>
                   </div>
 
                   {/* Incentive Type & Value */}
