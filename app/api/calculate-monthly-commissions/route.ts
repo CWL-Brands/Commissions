@@ -247,11 +247,27 @@ export async function POST(request: NextRequest) {
       if (customerStatus === 'rep_transfer') {
         const specialRule = repCommissionRates?.specialRules?.repTransfer;
         if (specialRule?.enabled) {
+          // Determine which rate to use based on customer segment
+          let transferRate = specialRule.percentFallback || 2.0; // Default fallback
+          
+          if (specialRule.segmentRates) {
+            const segmentLower = customerSegment.toLowerCase();
+            if (segmentLower.includes('wholesale') && specialRule.segmentRates.wholesale) {
+              transferRate = specialRule.segmentRates.wholesale;
+              console.log(`  Using Wholesale transfer rate: ${transferRate}%`);
+            } else if (segmentLower.includes('distributor') && specialRule.segmentRates.distributor) {
+              transferRate = specialRule.segmentRates.distributor;
+              console.log(`  Using Distributor transfer rate: ${transferRate}%`);
+            } else {
+              console.log(`  Using default transfer rate: ${transferRate}% (segment: ${customerSegment})`);
+            }
+          }
+          
           const flatFee = specialRule.flatFee || 0;
-          const percentCommission = new Decimal(orderAmount).times(specialRule.percentFallback || 0).dividedBy(100).toNumber();
+          const percentCommission = new Decimal(orderAmount).times(transferRate).dividedBy(100).toNumber();
           commissionAmount = specialRule.useGreater 
             ? Math.max(flatFee, percentCommission)
-            : flatFee;
+            : (flatFee > 0 ? flatFee : percentCommission);
         }
       } else {
         // Precise decimal calculation: orderAmount × (rate / 100)

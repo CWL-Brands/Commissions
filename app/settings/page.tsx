@@ -78,9 +78,13 @@ export default function SettingsPage() {
     specialRules: {
       repTransfer: {
         enabled: true,
-        flatFee: 500,
-        percentFallback: 5.0,
-        useGreater: true
+        flatFee: 0,
+        percentFallback: 2.0,
+        useGreater: true,
+        segmentRates: {
+          wholesale: 4.0,
+          distributor: 2.0
+        }
       },
       inactivityThreshold: 12
     },
@@ -3121,12 +3125,80 @@ export default function SettingsPage() {
                       </label>
                     </div>
                     <p className="text-sm text-gray-600 mb-4">
-                      When a customer changes sales reps, apply special commission rate for the new rep
+                      When a customer changes sales reps, apply special commission rate for the new rep based on customer segment
                     </p>
+                    
+                    {/* Segment-Specific Rates */}
+                    <div className="mb-4 p-3 bg-white rounded border border-blue-300">
+                      <h5 className="text-sm font-semibold text-gray-900 mb-3">Segment-Specific Transfer Rates</h5>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Wholesale Transfer Rate
+                          </label>
+                          <div className="flex items-center">
+                            <input
+                              type="number"
+                              value={commissionRates.specialRules.repTransfer.segmentRates?.wholesale || 4.0}
+                              onChange={(e) => setCommissionRates({
+                                ...commissionRates,
+                                specialRules: {
+                                  ...commissionRates.specialRules,
+                                  repTransfer: {
+                                    ...commissionRates.specialRules.repTransfer,
+                                    segmentRates: {
+                                      ...commissionRates.specialRules.repTransfer.segmentRates,
+                                      wholesale: Number(e.target.value)
+                                    }
+                                  }
+                                }
+                              })}
+                              step="0.1"
+                              className="input"
+                              placeholder="4.0"
+                            />
+                            <span className="ml-2 text-gray-600">%</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Distributor Transfer Rate
+                          </label>
+                          <div className="flex items-center">
+                            <input
+                              type="number"
+                              value={commissionRates.specialRules.repTransfer.segmentRates?.distributor || 2.0}
+                              onChange={(e) => setCommissionRates({
+                                ...commissionRates,
+                                specialRules: {
+                                  ...commissionRates.specialRules,
+                                  repTransfer: {
+                                    ...commissionRates.specialRules.repTransfer,
+                                    segmentRates: {
+                                      ...commissionRates.specialRules.repTransfer.segmentRates,
+                                      distributor: Number(e.target.value)
+                                    }
+                                  }
+                                }
+                              })}
+                              step="0.1"
+                              className="input"
+                              placeholder="2.0"
+                            />
+                            <span className="ml-2 text-gray-600">%</span>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        These rates apply when a customer is transferred to a new rep. The system will use the appropriate rate based on the customer&apos;s segment.
+                      </p>
+                    </div>
+
+                    {/* Fallback Options */}
                     <div className="grid grid-cols-3 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Flat Fee
+                          Flat Fee (Optional)
                         </label>
                         <div className="flex items-center">
                           <span className="text-gray-600 mr-1">$</span>
@@ -3144,13 +3216,13 @@ export default function SettingsPage() {
                               }
                             })}
                             className="input"
-                            placeholder="500"
+                            placeholder="0"
                           />
                         </div>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Percent Fallback
+                          Default Fallback %
                         </label>
                         <div className="flex items-center">
                           <input
@@ -3168,10 +3240,13 @@ export default function SettingsPage() {
                             })}
                             step="0.1"
                             className="input"
-                            placeholder="5.0"
+                            placeholder="2.0"
                           />
                           <span className="ml-2 text-gray-600">%</span>
                         </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Used if segment not found
+                        </p>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
