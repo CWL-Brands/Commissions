@@ -45,7 +45,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState('Q4 2025');
   const [quarters, setQuarters] = useState<string[]>(['Q4 2025', 'Q1 2026']);
-  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'customers' | 'team' | 'orgchart'>('quarterly');
+  const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly' | 'customers' | 'team' | 'orgchart' | 'products'>('quarterly');
 
   // Configuration state
   const [config, setConfig] = useState<CommissionConfig>({
@@ -131,6 +131,16 @@ export default function SettingsPage() {
   const [spiffs, setSpiffs] = useState<any[]>([]);
   const [showAddSpiffModal, setShowAddSpiffModal] = useState(false);
   const [editingSpiff, setEditingSpiff] = useState<any>(null);
+  
+  // Products state
+  const [allProducts, setAllProducts] = useState<any[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<any>(null);
+  const [productFile, setProductFile] = useState<File | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [importingProducts, setImportingProducts] = useState(false);
   
   // Batch edit state
   const [batchEditMode, setBatchEditMode] = useState(false);
@@ -457,6 +467,188 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error toggling spiff:', error);
       toast.error('Failed to update spiff status');
+    }
+  };
+
+  // Load products
+  useEffect(() => {
+    if (activeTab === 'products' && isAdmin) {
+      loadProducts();
+    }
+  }, [activeTab, isAdmin]);
+
+  const loadProducts = async () => {
+    try {
+      const productsSnapshot = await getDocs(collection(db, 'products'));
+      const productsData = productsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setAllProducts(productsData);
+      setFilteredProducts(productsData);
+    } catch (error) {
+      console.error('Error loading products:', error);
+      toast.error('Failed to load products');
+    }
+  };
+
+  // Filter products by search term
+  useEffect(() => {
+    if (!productSearchTerm) {
+      setFilteredProducts(allProducts);
+      return;
+    }
+
+    const term = productSearchTerm.toLowerCase();
+    const filtered = allProducts.filter(product =>
+      product.productNum?.toLowerCase().includes(term) ||
+      product.productDescription?.toLowerCase().includes(term) ||
+      product.category?.toLowerCase().includes(term)
+    );
+    setFilteredProducts(filtered);
+  }, [productSearchTerm, allProducts]);
+
+  const handleImportProducts = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportingProducts(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/products/import-csv', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success(`Imported ${result.stats.total} products!`);
+        loadProducts();
+      } else {
+        toast.error(result.error || 'Failed to import products');
+      }
+    } catch (error) {
+      console.error('Error importing products:', error);
+      toast.error('Failed to import products');
+    } finally {
+      setImportingProducts(false);
+      e.target.value = ''; // Reset file input
+    }
+  };
+
+  const handleSaveProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+
+    try {
+      const productData = {
+        productNum: formData.get('productNum'),
+        productDescription: formData.get('productDescription'),
+        category: formData.get('category'),
+        productType: formData.get('productType'),
+        size: formData.get('size'),
+        uom: formData.get('uom'),
+        notes: formData.get('notes') || '',
+        isActive: formData.get('isActive') === 'on',
+        quarterlyBonusEligible: formData.get('quarterlyBonusEligible') === 'on',
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (editingProduct) {
+        await updateDoc(doc(db, 'products', editingProduct.id), productData);
+        toast.success('Product updated successfully!');
+      } else {
+        await addDoc(collection(db, 'products'), {
+          ...productData,
+          createdAt: new Date().toISOString(),
+          imageUrl: null,
+          imagePath: null,
+        });
+        toast.success('Product added successfully!');
+      }
+
+      setShowAddProductModal(false);
+      setEditingProduct(null);
+      loadProducts();
+    } catch (error) {
+      console.error('Error saving product:', error);
+      toast.error('Failed to save product');
+    }
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    if (!confirm('Are you sure you want to delete this product?')) return;
+
+    try {
+      const product = allProducts.find(p => p.id === productId);
+      
+      // Delete image if exists
+      if (product?.imagePath) {
+        await fetch(`/api/products/upload-image?productId=${productId}&imagePath=${encodeURIComponent(product.imagePath)}`, {
+          method: 'DELETE',
+        });
+      }
+
+      await deleteDoc(doc(db, 'products', productId));
+      toast.success('Product deleted successfully!');
+      loadProducts();
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      toast.error('Failed to delete product');
+    }
+  };
+
+  const handleUploadProductImage = async (productId: string, productNum: string, file: File) => {
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('productId', productId);
+      formData.append('productNum', productNum);
+
+      const response = await fetch('/api/products/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success('Image uploaded successfully!');
+        loadProducts();
+      } else {
+        toast.error(result.error || 'Failed to upload image');
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      toast.error('Failed to upload image');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleDeleteProductImage = async (productId: string, imagePath: string) => {
+    if (!confirm('Are you sure you want to delete this image?')) return;
+
+    try {
+      const response = await fetch(`/api/products/upload-image?productId=${productId}&imagePath=${encodeURIComponent(imagePath)}`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success('Image deleted successfully!');
+        loadProducts();
+      } else {
+        toast.error(result.error || 'Failed to delete image');
+      }
+    } catch (error) {
+      console.error('Error deleting image:', error);
+      toast.error('Failed to delete image');
     }
   };
 

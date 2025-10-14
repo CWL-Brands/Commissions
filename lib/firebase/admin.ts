@@ -1,6 +1,7 @@
 import { getApps, getApp, initializeApp, applicationDefault, cert, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 
 // Initialize Firebase Admin SDK pinned to the intended project.
 // This avoids verifyIdToken() failing due to ambiguous or mismatched default credentials.
@@ -40,3 +41,4 @@ try {
 
 export const adminAuth = getAuth(app);
 export const adminDb = getFirestore(app);
+export const adminStorage = getStorage(app);
