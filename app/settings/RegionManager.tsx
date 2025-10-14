@@ -328,7 +328,7 @@ export default function RegionManager() {
                       .sort((a, b) => {
                         // Sort by orgRole priority, then by name
                         const rolePriority: any = {
-                          'vp': 1,
+                          'executive': 1,
                           'director': 2,
                           'regional': 3,
                           'division': 4,

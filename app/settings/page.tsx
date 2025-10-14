@@ -108,7 +108,7 @@ export default function SettingsPage() {
 
   // Org Chart state
   const [orgUsers, setOrgUsers] = useState<any[]>([]);
-  const [selectedOrgLevel, setSelectedOrgLevel] = useState<'all' | 'vp' | 'director' | 'regional' | 'division' | 'territory' | 'rep'>('all');
+  const [selectedOrgLevel, setSelectedOrgLevel] = useState<'all' | 'executive' | 'director' | 'regional' | 'division' | 'territory' | 'rep'>('all');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [orgChartSubTab, setOrgChartSubTab] = useState<'team' | 'regions' | 'regionManager' | 'map'>('team');
@@ -3461,7 +3461,7 @@ export default function SettingsPage() {
                     className="input"
                   >
                     <option value="all">All Levels</option>
-                    <option value="vp">VP Sales</option>
+                    <option value="executive">Executive</option>
                     <option value="director">Directors</option>
                     <option value="regional">Regional Managers</option>
                     <option value="division">Division Managers</option>
@@ -3526,19 +3526,20 @@ export default function SettingsPage() {
                             <td className="text-sm">{user.title || user.role}</td>
                             <td>
                               <span className={`px-2 py-1 text-xs rounded-full ${
-                                user.orgRole === 'vp' ? 'bg-purple-100 text-purple-800' :
+                                user.orgRole === 'executive' ? 'bg-purple-100 text-purple-800' :
                                 user.orgRole === 'director' ? 'bg-blue-100 text-blue-800' :
                                 user.orgRole === 'regional' ? 'bg-green-100 text-green-800' :
                                 user.orgRole === 'division' ? 'bg-yellow-100 text-yellow-800' :
                                 user.orgRole === 'territory' ? 'bg-orange-100 text-orange-800' :
+                                user.orgRole === 'rep' ? 'bg-gray-100 text-gray-800' :
                                 'bg-gray-100 text-gray-800'
                               }`}>
-                                {user.orgRole === 'vp' ? 'VP Sales' :
-                                 user.orgRole === 'director' ? 'Director' :
-                                 user.orgRole === 'regional' ? 'Regional Mgr' :
-                                 user.orgRole === 'division' ? 'Division Mgr' :
-                                 user.orgRole === 'territory' ? 'Territory Mgr' :
-                                 'Sales Rep'}
+                                {user.orgRole === 'executive' ? 'Executive' :
+                               user.orgRole === 'director' ? 'Director' :
+                               user.orgRole === 'regional' ? 'Regional Mgr' :
+                               user.orgRole === 'division' ? 'Division Mgr' :
+                               user.orgRole === 'territory' ? 'Territory Mgr' :
+                               user.orgRole === 'rep' ? 'Sales Rep' : 'Unknown'}
                               </span>
                             </td>
                             <td className="text-sm text-gray-600">
@@ -3578,8 +3579,8 @@ export default function SettingsPage() {
             {/* Quick Stats */}
             <div className="grid md:grid-cols-6 gap-4">
               <div className="card text-center">
-                <div className="text-2xl font-bold text-purple-600">{orgUsers.filter(u => u.orgRole === 'vp').length}</div>
-                <div className="text-xs text-gray-600">VP Sales</div>
+                <div className="text-2xl font-bold text-purple-600">{orgUsers.filter(u => u.orgRole === 'executive').length}</div>
+                <div className="text-xs text-gray-600">Executive</div>
               </div>
               <div className="card text-center">
                 <div className="text-2xl font-bold text-blue-600">{orgUsers.filter(u => u.orgRole === 'director').length}</div>
@@ -3724,7 +3725,7 @@ export default function SettingsPage() {
                         required
                         className="input w-full"
                       >
-                        <option value="vp">VP Sales</option>
+                        <option value="executive">Executive</option>
                         <option value="director">Director</option>
                         <option value="regional">Regional Manager</option>
                         <option value="division">Division Manager</option>
