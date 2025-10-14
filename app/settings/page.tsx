@@ -249,11 +249,15 @@ export default function SettingsPage() {
         }
       }
 
-      // Load products
+      // Load products (only quarterly bonus eligible or legacy products with targetPercent)
       const productsSnapshot = await getDocs(collection(db, 'products'));
       const productsData: ProductSubGoal[] = [];
       productsSnapshot.forEach((doc) => {
-        productsData.push({ id: doc.id, ...doc.data() } as ProductSubGoal);
+        const data = doc.data();
+        // Only include products that are quarterly bonus eligible OR have targetPercent (legacy data)
+        if (data.quarterlyBonusEligible === true || data.targetPercent !== undefined) {
+          productsData.push({ id: doc.id, ...data } as ProductSubGoal);
+        }
       });
       setProducts(productsData);
 
@@ -2192,22 +2196,33 @@ export default function SettingsPage() {
                 {products.map((product, index) => (
                   <tr key={product.id}>
                     <td>
-                      <input
-                        type="text"
-                        value={product.sku}
+                      <select
+                        value={product.sku || product.productNum || ''}
                         onChange={(e) => {
                           const newProducts = [...products];
+                          const selectedProduct = allProducts.find(p => p.productNum === e.target.value);
                           newProducts[index].sku = e.target.value;
+                          newProducts[index].productNum = e.target.value;
+                          newProducts[index].productDescription = selectedProduct?.productDescription || '';
                           setProducts(newProducts);
                         }}
                         className="input"
-                        placeholder="SKU-001"
-                      />
+                      >
+                        <option value="">Select a product...</option>
+                        {allProducts
+                          .filter(p => p.isActive && p.quarterlyBonusEligible)
+                          .sort((a, b) => a.productNum.localeCompare(b.productNum))
+                          .map(p => (
+                            <option key={p.id} value={p.productNum}>
+                              {p.productNum} - {p.productDescription}
+                            </option>
+                          ))}
+                      </select>
                     </td>
                     <td>
                       <input
                         type="number"
-                        value={product.targetPercent * 100}
+                        value={isNaN(product.targetPercent) ? '' : (product.targetPercent || 0) * 100}
                         onChange={(e) => {
                           const newProducts = [...products];
                           newProducts[index].targetPercent = Number(e.target.value) / 100;
@@ -2215,12 +2230,13 @@ export default function SettingsPage() {
                         }}
                         className="input"
                         step="0.1"
+                        placeholder="0"
                       />
                     </td>
                     <td>
                       <input
                         type="number"
-                        value={product.subWeight * 100}
+                        value={isNaN(product.subWeight) ? '' : (product.subWeight || 0) * 100}
                         onChange={(e) => {
                           const newProducts = [...products];
                           newProducts[index].subWeight = Number(e.target.value) / 100;
@@ -2228,6 +2244,7 @@ export default function SettingsPage() {
                         }}
                         className="input"
                         step="0.1"
+                        placeholder="0"
                       />
                     </td>
                     <td>
