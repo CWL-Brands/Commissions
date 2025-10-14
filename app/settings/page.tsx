@@ -384,10 +384,14 @@ export default function SettingsPage() {
     }
   }, [selectedTitle, activeTab]);
 
-  // Load spiffs/kickers
+  // Load spiffs/kickers and products for spiff dropdown
   useEffect(() => {
     if (activeTab === 'monthly' && isAdmin) {
       loadSpiffs();
+      // Load products for spiff dropdown
+      if (allProducts.length === 0) {
+        loadProducts();
+      }
     }
   }, [activeTab, isAdmin]);
 
@@ -4236,16 +4240,36 @@ export default function SettingsPage() {
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Product Number *
+                        Product *
                       </label>
-                      <input
-                        type="text"
+                      <select
                         name="productNum"
                         defaultValue={editingSpiff?.productNum || ''}
                         required
                         className="input w-full"
-                        placeholder="KB-038"
-                      />
+                        onChange={(e) => {
+                          const selectedProduct = allProducts.find(p => p.productNum === e.target.value);
+                          if (selectedProduct) {
+                            const descInput = document.querySelector('input[name="productDescription"]') as HTMLInputElement;
+                            if (descInput) {
+                              descInput.value = selectedProduct.productDescription || '';
+                            }
+                          }
+                        }}
+                      >
+                        <option value="">Select a product...</option>
+                        {allProducts
+                          .filter(p => p.isActive)
+                          .sort((a, b) => a.productNum.localeCompare(b.productNum))
+                          .map(product => (
+                            <option key={product.id} value={product.productNum}>
+                              {product.productNum} - {product.productDescription}
+                            </option>
+                          ))}
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Select from active products. Manage products in the Products tab.
+                      </p>
                     </div>
 
                     <div>
@@ -4256,9 +4280,13 @@ export default function SettingsPage() {
                         type="text"
                         name="productDescription"
                         defaultValue={editingSpiff?.productDescription || ''}
-                        className="input w-full"
-                        placeholder="Acrylic Kit - Black"
+                        className="input w-full bg-gray-50"
+                        placeholder="Auto-filled from product"
+                        readOnly
                       />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Auto-filled when product is selected
+                      </p>
                     </div>
                   </div>
 
