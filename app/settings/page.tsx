@@ -294,10 +294,17 @@ export default function SettingsPage() {
         console.log(`No commission rates found for ${selectedTitle}, using defaults`);
       }
 
-      // Load commission rules
+      // Load commission rules with defaults
       const rulesDoc = await getDoc(doc(db, 'settings', 'commission_rules'));
       if (rulesDoc.exists()) {
-        setCommissionRules(rulesDoc.data() as any);
+        const loadedRules = rulesDoc.data();
+        setCommissionRules({
+          excludeShipping: loadedRules?.excludeShipping ?? true,
+          excludeCCProcessing: loadedRules?.excludeCCProcessing ?? true,
+          useOrderValue: loadedRules?.useOrderValue ?? true,
+          applyReorgRule: loadedRules?.applyReorgRule ?? true,
+          reorgDate: loadedRules?.reorgDate ?? '2025-07-01',
+        });
         console.log('Loaded commission rules from Firestore');
       }
     } catch (error) {
