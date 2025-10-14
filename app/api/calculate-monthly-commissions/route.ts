@@ -27,6 +27,9 @@ export async function POST(request: NextRequest) {
 
     console.log(`Calculating monthly commissions for ${year}-${month}${salesPerson ? ` (${salesPerson})` : ' (all reps)'}`);
 
+    // Define commission month early for spiff filtering
+    const commissionMonth = `${year}-${month.padStart(2, '0')}`;
+
     // Get commission rates from settings (load all title-specific rate documents)
     const settingsSnapshot = await adminDb.collection('settings').get();
     const commissionRatesByTitle = new Map();
@@ -52,6 +55,26 @@ export async function POST(request: NextRequest) {
     const rulesDoc = await adminDb.collection('settings').doc('commission_rules').get();
     const commissionRules = rulesDoc.exists ? rulesDoc.data() : { excludeShipping: true, useOrderValue: true };
     console.log('Commission rules:', commissionRules);
+
+    // Load active spiffs for the period
+    const spiffsSnapshot = await adminDb.collection('spiffs')
+      .where('isActive', '==', true)
+      .get();
+    
+    const activeSpiffs = new Map();
+    spiffsSnapshot.forEach(doc => {
+      const spiff = doc.data();
+      const startDate = new Date(spiff.startDate);
+      const endDate = spiff.endDate ? new Date(spiff.endDate) : null;
+      const periodStart = new Date(`${year}-${month.padStart(2, '0')}-01`);
+      const periodEnd = new Date(year, parseInt(month), 0); // Last day of month
+      
+      // Check if spiff is active during this period
+      if (startDate <= periodEnd && (!endDate || endDate >= periodStart)) {
+        activeSpiffs.set(spiff.productNum, { id: doc.id, ...spiff });
+      }
+    });
+    console.log(`Loaded ${activeSpiffs.size} active spiffs for ${commissionMonth}`);
 
     // Load all customers with account types
     const customersSnapshot = await adminDb.collection('fishbowl_customers').get();
@@ -103,7 +126,6 @@ export async function POST(request: NextRequest) {
     console.log(`📋 Rep keys in map:`, Array.from(repsMap.keys()).join(', '));
 
     // Query Fishbowl sales orders for the specified month
-    const commissionMonth = `${year}-${month.padStart(2, '0')}`;
     let ordersQuery = adminDb.collection('fishbowl_sales_orders')
       .where('commissionMonth', '==', commissionMonth);
     
@@ -275,19 +297,87 @@ export async function POST(request: NextRequest) {
         notes: `${accountType} - ${customerStatus} - ${customerSegment}`
       });
 
+      // Calculate spiffs from line items
+      let orderSpiffTotal = 0;
+      if (activeSpiffs.size > 0) {
+        // Get line items for this order
+        const lineItemsSnapshot = await adminDb.collection('fishbowl_soitems')
+          .where('salesOrderId', '==', order.salesOrderId)
+          .get();
+        
+        for (const lineItemDoc of lineItemsSnapshot.docs) {
+          const lineItem = lineItemDoc.data();
+          const spiff = activeSpiffs.get(lineItem.productNum);
+          
+          if (spiff) {
+            let spiffAmount = 0;
+            const quantity = lineItem.quantity || 0;
+            const lineRevenue = lineItem.totalPrice || 0;
+            
+            if (spiff.incentiveType === 'flat') {
+              // Flat dollar amount per unit
+              spiffAmount = quantity * spiff.incentiveValue;
+            } else if (spiff.incentiveType === 'percentage') {
+              // Percentage of line item revenue
+              spiffAmount = new Decimal(lineRevenue).times(spiff.incentiveValue).dividedBy(100).toNumber();
+            }
+            
+            if (spiffAmount > 0) {
+              orderSpiffTotal += spiffAmount;
+              
+              // Save spiff earning record
+              const spiffEarningId = `${order.salesPerson}_${commissionMonth}_spiff_${lineItemDoc.id}`;
+              await adminDb.collection('spiff_earnings').doc(spiffEarningId).set({
+                id: spiffEarningId,
+                repId: rep.id,
+                salesPerson: order.salesPerson,
+                repName: rep.name,
+                
+                spiffId: spiff.id,
+                spiffName: spiff.name,
+                productNum: lineItem.productNum,
+                productDescription: lineItem.productDescription,
+                
+                orderId: order.salesOrderId,
+                orderNum: order.num,
+                customerId: order.customerId,
+                customerName: order.customerName,
+                
+                quantity: quantity,
+                lineRevenue: lineRevenue,
+                incentiveType: spiff.incentiveType,
+                incentiveValue: spiff.incentiveValue,
+                spiffAmount: spiffAmount,
+                
+                orderDate: order.postingDate,
+                commissionMonth: commissionMonth,
+                commissionYear: year,
+                
+                calculatedAt: new Date(),
+                paidStatus: 'pending',
+              });
+              
+              console.log(`💰 SPIFF EARNED: ${rep.name} | ${lineItem.productNum} | Qty: ${quantity} | ${spiff.incentiveType === 'flat' ? `$${spiff.incentiveValue}/unit` : `${spiff.incentiveValue}%`} = $${spiffAmount.toFixed(2)}`);
+            }
+          }
+        }
+      }
+
       // Track by rep
       if (!commissionsByRep.has(order.salesPerson)) {
         commissionsByRep.set(order.salesPerson, {
           repName: rep.name,
           orders: 0,
           revenue: 0,
-          commission: 0
+          commission: 0,
+          spiffs: 0
         });
       }
       const repSummary = commissionsByRep.get(order.salesPerson);
       repSummary.orders++;
       repSummary.revenue += order.revenue;
       repSummary.commission += commissionAmount;
+      repSummary.spiffs += orderSpiffTotal;
     }
 
     // Create monthly summaries
@@ -302,6 +392,8 @@ export async function POST(request: NextRequest) {
         totalOrders: summary.orders,
         totalRevenue: summary.revenue,
         totalCommission: summary.commission,
+        totalSpiffs: summary.spiffs,
+        totalEarnings: summary.commission + summary.spiffs,
         paidStatus: 'pending',
         calculatedAt: new Date()
       });
