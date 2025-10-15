@@ -166,6 +166,12 @@ export default function SettingsPage() {
 
   // Commission Summary state
   const [commissionSummary, setCommissionSummary] = useState<any>(null);
+  
+  // Processing modal state
+  const [showProcessingModal, setShowProcessingModal] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState<string>('');
+  const [processingProgress, setProcessingProgress] = useState<number>(0);
+  const [showConfetti, setShowConfetti] = useState(false);
 
   // Fishbowl Import state
   const [fishbowlFile, setFishbowlFile] = useState<File | null>(null);
@@ -252,14 +258,13 @@ export default function SettingsPage() {
         }
       }
 
-      // Load products (only products that have been added to quarterly bonus goals)
+      // Load products (only quarterly bonus eligible or legacy products with targetPercent)
       const productsSnapshot = await getDocs(collection(db, 'products'));
       const productsData: ProductSubGoal[] = [];
       productsSnapshot.forEach((doc) => {
         const data = doc.data();
-        // Only include products that have targetPercent defined (explicitly added to quarterly bonus)
-        // quarterlyBonusEligible flag just makes them available in the dropdown, not auto-added
-        if (data.targetPercent !== undefined) {
+        // Only include products that are quarterly bonus eligible OR have targetPercent (legacy data)
+        if (data.quarterlyBonusEligible === true || data.targetPercent !== undefined) {
           productsData.push({ id: doc.id, ...data } as ProductSubGoal);
         }
       });
@@ -522,7 +527,7 @@ export default function SettingsPage() {
 
   // Load products
   useEffect(() => {
-    if ((activeTab === 'products' || activeTab === 'quarterly') && isAdmin) {
+    if (activeTab === 'products' && isAdmin) {
       loadProducts();
     }
   }, [activeTab, isAdmin]);
@@ -1586,9 +1591,9 @@ export default function SettingsPage() {
       setBatchSalesRep('');
       setBatchTransferStatus('');
       setBatchEditMode(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error batch updating customers:', error);
-      toast.error('Failed to update customers', { id: loadingToast });
+      toast.error(error.message || 'Failed to update customers', { id: loadingToast });
     } finally {
       setSavingBatch(false);
     }
@@ -1681,20 +1686,47 @@ export default function SettingsPage() {
 
   const handleCalculateMonthlyCommissions = async (month: string, year: number) => {
     setSaving(true);
+    setShowProcessingModal(true);
+    setProcessingStatus('Initializing calculation...');
+    setProcessingProgress(0);
+    setShowConfetti(false);
+    
     const loadingToast = toast.loading('Calculating monthly commissions...');
     
     try {
+      // Simulate progress updates
+      setProcessingStatus('Loading commission rates...');
+      setProcessingProgress(10);
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      setProcessingStatus('Loading customer data...');
+      setProcessingProgress(20);
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      setProcessingStatus('Processing sales orders...');
+      setProcessingProgress(30);
+      
       const response = await fetch('/api/calculate-monthly-commissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ month, year })
       });
       
+      setProcessingProgress(70);
+      setProcessingStatus('Calculating commissions...');
+      
       const data = await response.json();
       
       if (!response.ok) {
         throw new Error(data.error || 'Calculation failed');
       }
+      
+      setProcessingProgress(90);
+      setProcessingStatus('Saving results...');
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Store summary data for display
       setCommissionSummary({
@@ -1708,6 +1740,10 @@ export default function SettingsPage() {
         calculatedAt: new Date().toISOString()
       });
 
+      setProcessingProgress(100);
+      setProcessingStatus('Complete! 🎉');
+      setShowConfetti(true);
+      
       // Show detailed success message
       if (data.commissionsCalculated > 0) {
         toast.success(
@@ -1730,8 +1766,15 @@ export default function SettingsPage() {
       
     } catch (error: any) {
       toast.error(error.message || 'Failed to calculate commissions', { id: loadingToast });
+      setShowProcessingModal(false);
     } finally {
       setSaving(false);
+      // Close modal after 3 seconds if successful
+      if (showConfetti) {
+        setTimeout(() => {
+          setShowProcessingModal(false);
+        }, 3000);
+      }
     }
   };
 
@@ -4570,6 +4613,68 @@ export default function SettingsPage() {
         description="Select the month and year to process Fishbowl sales orders"
       />
 
+      {/* Processing Modal */}
+      {showProcessingModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-8 relative overflow-hidden">
+            {showConfetti && (
+              <div className="absolute inset-0 pointer-events-none">
+                {[...Array(50)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="absolute animate-confetti"
+                    style={{
+                      left: `${Math.random() * 100}%`,
+                      top: `-${Math.random() * 20}px`,
+                      animationDelay: `${Math.random() * 0.5}s`,
+                      animationDuration: `${2 + Math.random() * 2}s`
+                    }}
+                  >
+                    {['🎉', '💰', '✨', '🎊', '💵'][Math.floor(Math.random() * 5)]}
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <div className="text-center relative z-10">
+              <div className="mb-6">
+                {processingProgress < 100 ? (
+                  <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-primary-600 mx-auto"></div>
+                ) : (
+                  <div className="text-6xl mb-4">💰</div>
+                )}
+              </div>
+              
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">
+                {processingProgress < 100 ? 'Processing...' : 'Cha-Ching! 🎉'}
+              </h3>
+              
+              <p className="text-gray-600 mb-6">{processingStatus}</p>
+              
+              <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
+                <div
+                  className="bg-gradient-to-r from-primary-500 to-green-500 h-3 rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${processingProgress}%` }}
+                ></div>
+              </div>
+              
+              <p className="text-sm font-semibold text-gray-700">{processingProgress}%</p>
+              
+              {processingProgress === 100 && (
+                <div className="mt-6">
+                  <button
+                    onClick={() => setShowProcessingModal(false)}
+                    className="btn btn-primary"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit Spiff Modal */}
       {showAddSpiffModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -5267,8 +5372,8 @@ export default function SettingsPage() {
 
       {/* Add/Edit Bonus Product Modal */}
       {showAddBonusProductModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto pt-20">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mb-8">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">
@@ -5299,7 +5404,7 @@ export default function SettingsPage() {
                   >
                     <option value="">Select a product...</option>
                     {allProducts
-                      .filter(p => p.isActive && p.quarterlyBonusEligible === true)
+                      .filter(p => p.isActive)
                       .sort((a, b) => a.productNum.localeCompare(b.productNum))
                       .map(product => (
                         <option key={product.id} value={product.productNum}>
@@ -5308,7 +5413,7 @@ export default function SettingsPage() {
                       ))}
                   </select>
                   <p className="text-xs text-gray-500 mt-1">
-                    Only showing products marked as quarterly bonus eligible. Manage eligibility in the Products tab.
+                    Select from active products. Use the Products tab to manage quarterly bonus eligibility.
                   </p>
                 </div>
 
