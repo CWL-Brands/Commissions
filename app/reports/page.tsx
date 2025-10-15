@@ -213,6 +213,27 @@ export default function ReportsPage() {
 
   const loadLineItems = async (orderNum: string, commissionRate: number) => {
     try {
+      // Load active spiffs for the selected month
+      const activeSpiffs = new Map();
+      if (selectedMonth) {
+        const [year, month] = selectedMonth.split('-');
+        const periodStart = new Date(parseInt(year), parseInt(month) - 1, 1);
+        const periodEnd = new Date(parseInt(year), parseInt(month), 0, 23, 59, 59);
+        
+        const spiffsQuery = query(collection(db, 'spiffs'));
+        const spiffsSnapshot = await getDocs(spiffsQuery);
+        
+        spiffsSnapshot.forEach(doc => {
+          const spiff = doc.data();
+          const startDate = spiff.startDate?.toDate?.() || new Date(spiff.startDate);
+          const endDate = spiff.endDate?.toDate?.() || (spiff.endDate ? new Date(spiff.endDate) : null);
+          
+          if (startDate <= periodEnd && (!endDate || endDate >= periodStart)) {
+            activeSpiffs.set(spiff.productNum, { id: doc.id, ...spiff });
+          }
+        });
+      }
+      
       // Query fishbowl_soitems for this order
       const itemsQuery = query(
         collection(db, 'fishbowl_soitems'),
@@ -225,10 +246,12 @@ export default function ReportsPage() {
       itemsSnapshot.forEach((doc) => {
         const data = doc.data();
         const lineTotal = (data.revenue || 0);
+        const quantity = data.quantity || 0;
         
         // Check if this is a shipping or CC processing line (should not be commissioned)
         const productName = (data.product || data.description || '').toLowerCase();
-        const productNum = (data.partNumber || data.productNum || '').toLowerCase();
+        const productNumber = data.partNumber || data.productNum || '';
+        const productNum = productNumber.toLowerCase();
         
         const isShipping = productName.includes('shipping') || 
                           productNum.includes('shipping') ||
@@ -238,16 +261,30 @@ export default function ReportsPage() {
                               productName.includes('credit card processing') ||
                               productNum.includes('cc processing');
         
-        // Only calculate commission if not shipping or CC processing
-        const commissionAmount = (isShipping || isCCProcessing) ? 0 : (lineTotal * (commissionRate / 100));
+        let commissionAmount = 0;
+        
+        // Check for spiff override first
+        const spiff = activeSpiffs.get(productNumber);
+        if (spiff && !isShipping && !isCCProcessing) {
+          // Spiff overrides percentage commission
+          const typeNormalized = (spiff.incentiveType || '').toLowerCase().replace(/[^a-z]/g, '');
+          if (typeNormalized === 'flat') {
+            commissionAmount = quantity * spiff.incentiveValue;
+          } else if (typeNormalized === 'percentage') {
+            commissionAmount = lineTotal * (spiff.incentiveValue / 100);
+          }
+        } else if (!isShipping && !isCCProcessing) {
+          // No spiff, use percentage commission
+          commissionAmount = lineTotal * (commissionRate / 100);
+        }
         
         items.push({
           id: doc.id,
           orderNum: orderNum,
-          productNum: data.partNumber || data.productNum || '',
+          productNum: productNumber,
           product: data.product || '',
           description: data.description || data.productDesc || '',
-          quantity: data.quantity || 0,
+          quantity: quantity,
           unitPrice: data.unitPrice || 0,
           lineTotal: lineTotal,
           commissionAmount: commissionAmount,
