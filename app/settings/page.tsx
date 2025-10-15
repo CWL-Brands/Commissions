@@ -27,6 +27,7 @@ import {
   ArrowDown,
   Lock,
   Map as MapIcon,
+  X,
   DollarSign,
   TrendingUp
 } from 'lucide-react';
@@ -152,6 +153,8 @@ export default function SettingsPage() {
   const [productFile, setProductFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [importingProducts, setImportingProducts] = useState(false);
+  const [showAddBonusProductModal, setShowAddBonusProductModal] = useState(false);
+  const [editingBonusProduct, setEditingBonusProduct] = useState<any>(null);
   
   // Batch edit state
   const [batchEditMode, setBatchEditMode] = useState(false);
@@ -1052,6 +1055,52 @@ export default function SettingsPage() {
         active: true,
       },
     ]);
+  };
+
+  const handleSaveBonusProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    
+    try {
+      const productNum = formData.get('productNum') as string;
+      const selectedProduct = allProducts.find(p => p.productNum === productNum);
+      
+      if (!selectedProduct) {
+        toast.error('Please select a product');
+        return;
+      }
+
+      const bonusProductData = {
+        sku: productNum,
+        productNum: productNum,
+        productDescription: selectedProduct.productDescription,
+        targetPercent: Number(formData.get('targetPercent')) / 100,
+        subWeight: Number(formData.get('subWeight')) / 100,
+        msrp: Number(formData.get('msrp')) || undefined,
+        active: formData.get('active') === 'on',
+        notes: formData.get('notes') || '',
+        quarterlyBonusEligible: true,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (editingBonusProduct) {
+        await updateDoc(doc(db, 'products', editingBonusProduct.id), bonusProductData);
+        toast.success('Bonus product updated successfully!');
+      } else {
+        await addDoc(collection(db, 'products'), {
+          ...bonusProductData,
+          createdAt: new Date().toISOString(),
+        });
+        toast.success('Bonus product added successfully!');
+      }
+
+      setShowAddBonusProductModal(false);
+      setEditingBonusProduct(null);
+      loadSettings();
+    } catch (error) {
+      console.error('Error saving bonus product:', error);
+      toast.error('Failed to save bonus product');
+    }
   };
 
   const removeProduct = async (id: string) => {
@@ -2162,7 +2211,10 @@ export default function SettingsPage() {
             <h2 className="text-xl font-semibold text-gray-900">Product Mix Sub-Goals (Bucket B)</h2>
             <div className="flex space-x-2">
               <button
-                onClick={addProduct}
+                onClick={() => {
+                  setEditingBonusProduct(null);
+                  setShowAddBonusProductModal(true);
+                }}
                 className="btn btn-secondary flex items-center"
               >
                 <Plus className="w-4 h-4 mr-2" />
@@ -5207,6 +5259,168 @@ export default function SettingsPage() {
               >
                 Yes, Change Rep
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit Bonus Product Modal */}
+      {showAddBonusProductModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {editingBonusProduct ? 'Edit' : 'Add'} Quarterly Bonus Product
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowAddBonusProductModal(false);
+                    setEditingBonusProduct(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveBonusProduct} className="space-y-6">
+                {/* Product Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Product *
+                  </label>
+                  <select
+                    name="productNum"
+                    defaultValue={editingBonusProduct?.productNum || editingBonusProduct?.sku || ''}
+                    required
+                    className="input w-full"
+                  >
+                    <option value="">Select a product...</option>
+                    {allProducts
+                      .filter(p => p.isActive && p.quarterlyBonusEligible)
+                      .sort((a, b) => a.productNum.localeCompare(b.productNum))
+                      .map(product => (
+                        <option key={product.id} value={product.productNum}>
+                          {product.productNum} - {product.productDescription}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Select from active products marked as quarterly bonus eligible
+                  </p>
+                </div>
+
+                {/* Target % and Sub-Weight % */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Target % *
+                    </label>
+                    <input
+                      type="number"
+                      name="targetPercent"
+                      defaultValue={editingBonusProduct ? (editingBonusProduct.targetPercent * 100) : ''}
+                      required
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      className="input w-full"
+                      placeholder="10.0"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Target percentage for this product
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Sub-Weight % *
+                    </label>
+                    <input
+                      type="number"
+                      name="subWeight"
+                      defaultValue={editingBonusProduct ? (editingBonusProduct.subWeight * 100) : ''}
+                      required
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      className="input w-full"
+                      placeholder="15.0"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Weight percentage in Bucket B
+                    </p>
+                  </div>
+                </div>
+
+                {/* MSRP */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    MSRP (Optional)
+                  </label>
+                  <input
+                    type="number"
+                    name="msrp"
+                    defaultValue={editingBonusProduct?.msrp || ''}
+                    step="0.01"
+                    min="0"
+                    className="input w-full"
+                    placeholder="99.99"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Manufacturer&apos;s suggested retail price
+                  </p>
+                </div>
+
+                {/* Active Checkbox */}
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    name="active"
+                    id="bonusProductActive"
+                    defaultChecked={editingBonusProduct?.active !== false}
+                    className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="bonusProductActive" className="ml-2 block text-sm text-gray-900">
+                    Active (include in quarterly bonus calculations)
+                  </label>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Notes (Optional)
+                  </label>
+                  <textarea
+                    name="notes"
+                    defaultValue={editingBonusProduct?.notes || ''}
+                    rows={3}
+                    className="input w-full"
+                    placeholder="Additional notes about this product goal..."
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddBonusProductModal(false);
+                      setEditingBonusProduct(null);
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                  >
+                    {editingBonusProduct ? 'Update' : 'Add'} Product
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
