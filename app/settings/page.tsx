@@ -4453,11 +4453,29 @@ export default function SettingsPage() {
                           <td className="text-sm">{product.size || 'N/A'}</td>
                           <td className="text-sm font-mono">{product.uom || 'N/A'}</td>
                           <td>
-                            {product.quarterlyBonusEligible ? (
-                              <CheckCircle className="w-5 h-5 text-green-600" />
-                            ) : (
-                              <span className="text-gray-400">—</span>
-                            )}
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await updateDoc(doc(db, 'products', product.id), {
+                                    quarterlyBonusEligible: !product.quarterlyBonusEligible,
+                                    updatedAt: new Date().toISOString(),
+                                  });
+                                  toast.success(`Quarterly bonus eligibility ${!product.quarterlyBonusEligible ? 'enabled' : 'disabled'}!`);
+                                  loadProducts();
+                                } catch (error) {
+                                  console.error('Error updating quarterly bonus eligibility:', error);
+                                  toast.error('Failed to update eligibility');
+                                }
+                              }}
+                              className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+                                product.quarterlyBonusEligible
+                                  ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                  : 'bg-red-100 text-red-800 hover:bg-red-200'
+                              }`}
+                              title={`Click to ${product.quarterlyBonusEligible ? 'disable' : 'enable'} quarterly bonus`}
+                            >
+                              {product.quarterlyBonusEligible ? '✓ Yes' : '✗ No'}
+                            </button>
                           </td>
                           <td>
                             <div className="flex space-x-2">
