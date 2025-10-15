@@ -140,10 +140,98 @@ export default function ReportsPage() {
         detailsSnapshot.forEach((doc) => {
           detailsData.push({ id: doc.id, ...doc.data() } as MonthlyCommissionDetail);
         });
-        setMonthlyDetails(detailsData);
+        
+        // Recalculate commissions with spiff overrides
+        const updatedDetails = await recalculateCommissionsWithSpiffs(detailsData, selectedMonth);
+        setMonthlyDetails(updatedDetails);
       }
     } catch (error) {
       console.error('Error loading monthly data:', error);
+    }
+  };
+
+  // Recalculate order commissions to account for spiff overrides
+  const recalculateCommissionsWithSpiffs = async (details: MonthlyCommissionDetail[], month: string): Promise<MonthlyCommissionDetail[]> => {
+    try {
+      // Load active spiffs for the month
+      const [year, monthNum] = month.split('-');
+      const periodStart = new Date(parseInt(year), parseInt(monthNum) - 1, 1);
+      const periodEnd = new Date(parseInt(year), parseInt(monthNum), 0, 23, 59, 59);
+      
+      const spiffsQuery = query(collection(db, 'spiffs'));
+      const spiffsSnapshot = await getDocs(spiffsQuery);
+      const activeSpiffs = new Map();
+      
+      spiffsSnapshot.forEach(doc => {
+        const spiff = doc.data();
+        const startDate = spiff.startDate?.toDate?.() || new Date(spiff.startDate);
+        const endDate = spiff.endDate?.toDate?.() || (spiff.endDate ? new Date(spiff.endDate) : null);
+        
+        if (startDate <= periodEnd && (!endDate || endDate >= periodStart)) {
+          activeSpiffs.set(spiff.productNum, { id: doc.id, ...spiff });
+        }
+      });
+
+      // If no spiffs, return original details
+      if (activeSpiffs.size === 0) {
+        return details;
+      }
+
+      // Recalculate commission for each order
+      const updatedDetails = await Promise.all(details.map(async (detail) => {
+        try {
+          // Load line items for this order
+          const itemsQuery = query(
+            collection(db, 'fishbowl_soitems'),
+            where('salesOrderNum', '==', detail.orderNum)
+          );
+          
+          const itemsSnapshot = await getDocs(itemsQuery);
+          let totalCommission = 0;
+          
+          itemsSnapshot.forEach((doc) => {
+            const data = doc.data();
+            const lineTotal = data.revenue || 0;
+            const quantity = data.quantity || 0;
+            const productNumber = data.partNumber || data.productNum || '';
+            
+            // Check if shipping or CC processing
+            const productName = (data.product || data.description || '').toLowerCase();
+            const productNum = productNumber.toLowerCase();
+            const isShipping = productName.includes('shipping') || productNum.includes('shipping') || productName === 'shipping';
+            const isCCProcessing = productName.includes('cc processing') || productName.includes('credit card processing') || productNum.includes('cc processing');
+            
+            if (isShipping || isCCProcessing) {
+              return; // No commission
+            }
+            
+            // Check for spiff override
+            const spiff = activeSpiffs.get(productNumber);
+            if (spiff) {
+              const typeNormalized = (spiff.incentiveType || '').toLowerCase().replace(/[^a-z]/g, '');
+              if (typeNormalized === 'flat') {
+                totalCommission += quantity * spiff.incentiveValue;
+              } else if (typeNormalized === 'percentage') {
+                totalCommission += lineTotal * (spiff.incentiveValue / 100);
+              }
+            } else {
+              // Use percentage commission
+              totalCommission += lineTotal * (detail.commissionRate / 100);
+            }
+          });
+          
+          // Return updated detail with recalculated commission
+          return { ...detail, commissionAmount: totalCommission };
+        } catch (error) {
+          console.error(`Error recalculating commission for order ${detail.orderNum}:`, error);
+          return detail; // Return original on error
+        }
+      }));
+
+      return updatedDetails;
+    } catch (error) {
+      console.error('Error recalculating commissions with spiffs:', error);
+      return details; // Return original on error
     }
   };
 
