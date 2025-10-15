@@ -377,8 +377,19 @@ export async function POST(request: NextRequest) {
           const lineItem = lineItemDoc.data();
           const spiff = activeSpiffs.get(lineItem.productNum);
           
-          // Debug: Log all line items to see product numbers
-          console.log(`  🔍 Line Item: ${lineItem.productNum} | ${lineItem.productDescription || lineItem.productName} | Qty: ${lineItem.quantity} | Spiff: ${spiff ? 'YES' : 'NO'}`);
+          // Debug: Log all line items to see product numbers and available fields
+          console.log(`  🔍 Line Item Fields:`, {
+            productNum: lineItem.productNum,
+            partNumber: lineItem.partNumber,
+            partNum: lineItem.partNum,
+            productId: lineItem.productId,
+            product: lineItem.product,
+            productName: lineItem.productName,
+            productDescription: lineItem.productDescription,
+            description: lineItem.description,
+            quantity: lineItem.quantity
+          });
+          console.log(`  🔍 Checking spiff for: ${lineItem.productNum || lineItem.partNumber || lineItem.partNum || 'NO_PRODUCT_NUM'} | Spiff: ${spiff ? 'YES' : 'NO'}`);
           
           if (spiff) {
             let spiffAmount = 0;
