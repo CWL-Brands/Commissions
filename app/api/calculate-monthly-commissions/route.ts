@@ -428,8 +428,8 @@ export async function POST(request: NextRequest) {
                 
                 spiffId: spiff.id,
                 spiffName: spiff.name,
-                productNum: lineItem.productNum,
-                productDescription: lineItem.productDescription,
+                productNum: productNumber, // Use productNumber instead of lineItem.productNum (which is undefined)
+                productDescription: lineItem.description || lineItem.productDescription || '',
                 
                 orderId: order.salesOrderId,
                 orderNum: order.num,
