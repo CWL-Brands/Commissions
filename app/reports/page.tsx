@@ -225,7 +225,21 @@ export default function ReportsPage() {
       itemsSnapshot.forEach((doc) => {
         const data = doc.data();
         const lineTotal = (data.revenue || 0);
-        const commissionAmount = lineTotal * (commissionRate / 100);
+        
+        // Check if this is a shipping or CC processing line (should not be commissioned)
+        const productName = (data.product || data.description || '').toLowerCase();
+        const productNum = (data.partNumber || data.productNum || '').toLowerCase();
+        
+        const isShipping = productName.includes('shipping') || 
+                          productNum.includes('shipping') ||
+                          productName === 'shipping';
+        
+        const isCCProcessing = productName.includes('cc processing') ||
+                              productName.includes('credit card processing') ||
+                              productNum.includes('cc processing');
+        
+        // Only calculate commission if not shipping or CC processing
+        const commissionAmount = (isShipping || isCCProcessing) ? 0 : (lineTotal * (commissionRate / 100));
         
         items.push({
           id: doc.id,
