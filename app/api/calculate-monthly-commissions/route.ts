@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
       // Check if spiff is active during this period
       if (startDate <= periodEnd && (!endDate || endDate >= periodStart)) {
         activeSpiffs.set(spiff.productNum, { id: doc.id, ...spiff });
+        console.log(`  📌 Spiff: ${spiff.productNum} | Type: "${spiff.incentiveType}" | Value: $${spiff.incentiveValue}`);
       }
     });
     console.log(`Loaded ${activeSpiffs.size} active spiffs for ${commissionMonth}`);
@@ -274,6 +275,13 @@ export async function POST(request: NextRequest) {
               productNum === 'cc processing'
             );
             
+            // Debug logging for exclusions
+            if (isShipping) {
+              console.log(`  🚫 EXCLUDED (Shipping): ${lineItem.productNum} | ${lineItem.productName} | $${lineItem.totalPrice || 0}`);
+            } else if (isCCProcessing) {
+              console.log(`  🚫 EXCLUDED (CC Processing): ${lineItem.productNum} | ${lineItem.productName} | $${lineItem.totalPrice || 0}`);
+            }
+            
             // Only include if not excluded
             if (!isShipping && !isCCProcessing) {
               commissionableAmount += lineItem.totalPrice || 0;
@@ -369,17 +377,29 @@ export async function POST(request: NextRequest) {
           const lineItem = lineItemDoc.data();
           const spiff = activeSpiffs.get(lineItem.productNum);
           
+          // Debug: Log all line items to see product numbers
+          console.log(`  🔍 Line Item: ${lineItem.productNum} | ${lineItem.productDescription || lineItem.productName} | Qty: ${lineItem.quantity} | Spiff: ${spiff ? 'YES' : 'NO'}`);
+          
           if (spiff) {
             let spiffAmount = 0;
             const quantity = lineItem.quantity || 0;
             const lineRevenue = lineItem.totalPrice || 0;
             
-            if (spiff.incentiveType === 'flat') {
+            console.log(`  🎯 SPIFF MATCH! Product: ${lineItem.productNum} | Type: "${spiff.incentiveType}" | Value: $${spiff.incentiveValue} | Qty: ${quantity}`);
+            
+            // Normalize incentiveType to handle variations like "Flat $" or "flat"
+            const typeNormalized = (spiff.incentiveType || '').toLowerCase().replace(/[^a-z]/g, '');
+            
+            if (typeNormalized === 'flat') {
               // Flat dollar amount per unit
               spiffAmount = quantity * spiff.incentiveValue;
-            } else if (spiff.incentiveType === 'percentage') {
+              console.log(`  💰 FLAT SPIFF: ${quantity} × $${spiff.incentiveValue} = $${spiffAmount.toFixed(2)}`);
+            } else if (typeNormalized === 'percentage') {
               // Percentage of line item revenue
               spiffAmount = new Decimal(lineRevenue).times(spiff.incentiveValue).dividedBy(100).toNumber();
+              console.log(`  💰 PERCENTAGE SPIFF: $${lineRevenue} × ${spiff.incentiveValue}% = $${spiffAmount.toFixed(2)}`);
+            } else {
+              console.log(`  ⚠️ UNKNOWN SPIFF TYPE: "${spiff.incentiveType}" (normalized: "${typeNormalized}")`);
             }
             
             if (spiffAmount > 0) {
