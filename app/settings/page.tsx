@@ -252,13 +252,14 @@ export default function SettingsPage() {
         }
       }
 
-      // Load products (only quarterly bonus eligible or legacy products with targetPercent)
+      // Load products (only products that have been added to quarterly bonus goals)
       const productsSnapshot = await getDocs(collection(db, 'products'));
       const productsData: ProductSubGoal[] = [];
       productsSnapshot.forEach((doc) => {
         const data = doc.data();
-        // Only include products that are quarterly bonus eligible OR have targetPercent (legacy data)
-        if (data.quarterlyBonusEligible === true || data.targetPercent !== undefined) {
+        // Only include products that have targetPercent defined (explicitly added to quarterly bonus)
+        // quarterlyBonusEligible flag just makes them available in the dropdown, not auto-added
+        if (data.targetPercent !== undefined) {
           productsData.push({ id: doc.id, ...data } as ProductSubGoal);
         }
       });
