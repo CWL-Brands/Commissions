@@ -1692,6 +1692,7 @@ export default function SettingsPage() {
     setShowConfetti(false);
     
     const loadingToast = toast.loading('Calculating monthly commissions...');
+    let progressInterval: NodeJS.Timeout | null = null;
     
     try {
       // Simulate progress updates
@@ -1708,14 +1709,31 @@ export default function SettingsPage() {
       setProcessingStatus('Processing sales orders...');
       setProcessingProgress(30);
       
+      // Start a progress animation that continues during the API call
+      progressInterval = setInterval(() => {
+        setProcessingProgress(prev => {
+          if (prev < 85) {
+            return prev + 1;
+          }
+          return prev;
+        });
+      }, 200); // Update every 200ms
+      
+      // Update status messages during processing
+      setTimeout(() => setProcessingStatus('Analyzing customer segments...'), 1000);
+      setTimeout(() => setProcessingStatus('Applying commission rates...'), 3000);
+      setTimeout(() => setProcessingStatus('Calculating spiffs and bonuses...'), 5000);
+      setTimeout(() => setProcessingStatus('Processing special rules...'), 7000);
+      setTimeout(() => setProcessingStatus('Finalizing calculations...'), 9000);
+      
       const response = await fetch('/api/calculate-monthly-commissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ month, year })
       });
       
-      setProcessingProgress(70);
-      setProcessingStatus('Calculating commissions...');
+      // Stop the progress interval
+      if (progressInterval) clearInterval(progressInterval);
       
       const data = await response.json();
       
@@ -1765,6 +1783,8 @@ export default function SettingsPage() {
       console.log(`📋 Orders Processed: ${data.processed}`);
       
     } catch (error: any) {
+      // Clean up interval on error
+      if (progressInterval) clearInterval(progressInterval);
       toast.error(error.message || 'Failed to calculate commissions', { id: loadingToast });
       setShowProcessingModal(false);
     } finally {
