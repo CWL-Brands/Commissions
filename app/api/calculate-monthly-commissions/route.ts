@@ -163,6 +163,9 @@ export async function POST(request: NextRequest) {
       retail: 0,
       inactiveRep: 0
     };
+    
+    // Track spiff details for summary
+    const spiffDetails: any[] = [];
 
     // Process each order
     for (const orderDoc of ordersSnapshot.docs) {
@@ -418,6 +421,20 @@ export async function POST(request: NextRequest) {
             if (spiffAmount > 0) {
               orderSpiffTotal += spiffAmount;
               
+              // Track spiff for summary
+              spiffDetails.push({
+                repName: rep.name,
+                salesPerson: order.salesPerson,
+                orderNum: order.num,
+                customerName: order.customerName,
+                productNum: productNumber,
+                productDescription: lineItem.description || lineItem.productDescription || '',
+                quantity: quantity,
+                spiffType: typeNormalized,
+                spiffValue: spiff.incentiveValue,
+                spiffAmount: spiffAmount
+              });
+              
               // Save spiff earning record
               const spiffEarningId = `${order.salesPerson}_${commissionMonth}_spiff_${lineItemDoc.id}`;
               await adminDb.collection('spiff_earnings').doc(spiffEarningId).set({
@@ -512,10 +529,33 @@ export async function POST(request: NextRequest) {
     if (commissionsCalculated > 0) {
       console.log(`\n💵 COMMISSIONS BY REP:`);
       for (const [salesPerson, summary] of commissionsByRep.entries()) {
-        console.log(`   ${summary.repName} (${salesPerson}): ${summary.orders} orders = $${summary.commission.toFixed(2)}`);
+        const spiffTotal = summary.spiffs || 0;
+        const totalEarnings = summary.commission + spiffTotal;
+        console.log(`   ${summary.repName} (${salesPerson}): ${summary.orders} orders | Commission: $${summary.commission.toFixed(2)} | Spiffs: $${spiffTotal.toFixed(2)} | Total: $${totalEarnings.toFixed(2)}`);
       }
     }
-    console.log('='.repeat(80) + '\n');
+    
+    // Print spiff summary if any spiffs were earned
+    if (spiffDetails.length > 0) {
+      console.log(`\n🎁 SPIFFS EARNED (${spiffDetails.length} total):`);
+      const spiffsByRep = new Map();
+      spiffDetails.forEach(spiff => {
+        if (!spiffsByRep.has(spiff.repName)) {
+          spiffsByRep.set(spiff.repName, []);
+        }
+        spiffsByRep.get(spiff.repName).push(spiff);
+      });
+      
+      for (const [repName, spiffs] of spiffsByRep.entries()) {
+        const repTotal = spiffs.reduce((sum: number, s: any) => sum + s.spiffAmount, 0);
+        console.log(`\n   ${repName}: ${spiffs.length} spiffs = $${repTotal.toFixed(2)}`);
+        spiffs.forEach((s: any) => {
+          console.log(`      Order ${s.orderNum} | ${s.productNum} | Qty: ${s.quantity} | ${s.spiffType === 'flat' ? `$${s.spiffValue}/unit` : `${s.spiffValue}%`} = $${s.spiffAmount.toFixed(2)}`);
+        });
+      }
+    }
+    
+    console.log('\n' + '='.repeat(80) + '\n');
 
     // Format rep breakdown for UI
     const repBreakdown: { [key: string]: any } = {};
@@ -528,6 +568,15 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // Group spiffs by rep for response
+    const spiffsByRep = new Map();
+    spiffDetails.forEach(spiff => {
+      if (!spiffsByRep.has(spiff.repName)) {
+        spiffsByRep.set(spiff.repName, []);
+      }
+      spiffsByRep.get(spiff.repName).push(spiff);
+    });
+
     return NextResponse.json({
       success: true,
       processed: processed,
@@ -535,7 +584,10 @@ export async function POST(request: NextRequest) {
       totalCommission: totalCommission,
       repBreakdown: repBreakdown,
       skippedCounts: skippedCounts,
-      summary: Object.fromEntries(commissionsByRep)
+      summary: Object.fromEntries(commissionsByRep),
+      spiffDetails: spiffDetails,
+      spiffsByRep: Object.fromEntries(spiffsByRep),
+      totalSpiffs: spiffDetails.reduce((sum, s) => sum + s.spiffAmount, 0)
     });
 
   } catch (error: any) {
