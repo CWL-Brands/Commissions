@@ -53,7 +53,11 @@ export async function POST(request: NextRequest) {
 
     // Get commission rules from settings
     const rulesDoc = await adminDb.collection('settings').doc('commission_rules').get();
-    const commissionRules = rulesDoc.exists ? rulesDoc.data() : { excludeShipping: true, useOrderValue: true };
+    const commissionRules = rulesDoc.exists ? rulesDoc.data() : { 
+      excludeShipping: true, 
+      excludeCCProcessing: true,
+      useOrderValue: true 
+    };
     console.log('Commission rules:', commissionRules);
 
     // Load active spiffs for the period
@@ -239,8 +243,43 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Use orderValue or revenue based on rules
-      const orderAmount = commissionRules?.useOrderValue ? (order.orderValue || order.revenue) : order.revenue;
+      // Calculate commission base by excluding shipping and CC processing if configured
+      let orderAmount = commissionRules?.useOrderValue ? (order.orderValue || order.revenue) : order.revenue;
+      
+      // If exclusions are enabled, calculate from line items
+      if (commissionRules?.excludeShipping || commissionRules?.excludeCCProcessing) {
+        const lineItemsSnapshot = await adminDb.collection('fishbowl_soitems')
+          .where('salesOrderId', '==', order.salesOrderId)
+          .get();
+        
+        let commissionableAmount = 0;
+        for (const lineItemDoc of lineItemsSnapshot.docs) {
+          const lineItem = lineItemDoc.data();
+          const productName = (lineItem.productName || '').toLowerCase();
+          const productNum = (lineItem.productNum || '').toLowerCase();
+          
+          // Check if this line item should be excluded
+          const isShipping = commissionRules?.excludeShipping && (
+            productName.includes('shipping') || 
+            productNum.includes('shipping') ||
+            productName === 'shipping'
+          );
+          
+          const isCCProcessing = commissionRules?.excludeCCProcessing && (
+            productName.includes('cc processing') ||
+            productName.includes('credit card processing') ||
+            productNum.includes('cc processing') ||
+            productNum === 'cc processing'
+          );
+          
+          // Only include if not excluded
+          if (!isShipping && !isCCProcessing) {
+            commissionableAmount += lineItem.totalPrice || 0;
+          }
+        }
+        
+        orderAmount = commissionableAmount;
+      }
 
       // Calculate commission using Decimal.js for precision
       let commissionAmount = 0;
