@@ -521,7 +521,7 @@ export default function SettingsPage() {
 
   // Load products
   useEffect(() => {
-    if (activeTab === 'products' && isAdmin) {
+    if ((activeTab === 'products' || activeTab === 'quarterly') && isAdmin) {
       loadProducts();
     }
   }, [activeTab, isAdmin]);
@@ -5298,7 +5298,7 @@ export default function SettingsPage() {
                   >
                     <option value="">Select a product...</option>
                     {allProducts
-                      .filter(p => p.isActive && p.quarterlyBonusEligible)
+                      .filter(p => p.isActive && p.quarterlyBonusEligible === true)
                       .sort((a, b) => a.productNum.localeCompare(b.productNum))
                       .map(product => (
                         <option key={product.id} value={product.productNum}>
@@ -5307,7 +5307,7 @@ export default function SettingsPage() {
                       ))}
                   </select>
                   <p className="text-xs text-gray-500 mt-1">
-                    Select from active products marked as quarterly bonus eligible
+                    Only showing products marked as quarterly bonus eligible. Manage eligibility in the Products tab.
                   </p>
                 </div>
 
