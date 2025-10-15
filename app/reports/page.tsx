@@ -291,6 +291,16 @@ export default function ReportsPage() {
         });
       });
       
+      // Calculate total commission from line items (to reflect spiff overrides)
+      const totalLineItemCommission = items.reduce((sum, item) => sum + item.commissionAmount, 0);
+      
+      // Update the order's commission amount in monthlyDetails to reflect actual line item totals
+      setMonthlyDetails(prev => prev.map(detail => 
+        detail.orderNum === orderNum 
+          ? { ...detail, commissionAmount: totalLineItemCommission }
+          : detail
+      ));
+      
       // Update the map
       setOrderLineItems(prev => new Map(prev).set(orderNum, items));
     } catch (error) {
