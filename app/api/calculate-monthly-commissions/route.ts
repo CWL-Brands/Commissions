@@ -375,7 +375,9 @@ export async function POST(request: NextRequest) {
         
         for (const lineItemDoc of lineItemsSnapshot.docs) {
           const lineItem = lineItemDoc.data();
-          const spiff = activeSpiffs.get(lineItem.productNum);
+          // Use partNumber instead of productNum (Fishbowl field name)
+          const productNumber = lineItem.partNumber || lineItem.productNum || lineItem.product;
+          const spiff = activeSpiffs.get(productNumber);
           
           // Debug: Log all line items to see product numbers and available fields
           console.log(`  🔍 Line Item Fields:`, {
@@ -389,14 +391,14 @@ export async function POST(request: NextRequest) {
             description: lineItem.description,
             quantity: lineItem.quantity
           });
-          console.log(`  🔍 Checking spiff for: ${lineItem.productNum || lineItem.partNumber || lineItem.partNum || 'NO_PRODUCT_NUM'} | Spiff: ${spiff ? 'YES' : 'NO'}`);
+          console.log(`  🔍 Checking spiff for: ${productNumber || 'NO_PRODUCT_NUM'} | Spiff: ${spiff ? 'YES' : 'NO'}`);
           
           if (spiff) {
             let spiffAmount = 0;
             const quantity = lineItem.quantity || 0;
             const lineRevenue = lineItem.totalPrice || 0;
             
-            console.log(`  🎯 SPIFF MATCH! Product: ${lineItem.productNum} | Type: "${spiff.incentiveType}" | Value: $${spiff.incentiveValue} | Qty: ${quantity}`);
+            console.log(`  🎯 SPIFF MATCH! Product: ${productNumber} | Type: "${spiff.incentiveType}" | Value: $${spiff.incentiveValue} | Qty: ${quantity}`);
             
             // Normalize incentiveType to handle variations like "Flat $" or "flat"
             const typeNormalized = (spiff.incentiveType || '').toLowerCase().replace(/[^a-z]/g, '');
