@@ -183,11 +183,18 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           .trim();
         
         // Parse posting date for commission tracking
-        const postingDateRaw = row['Posting Date'];
+        // Try multiple date field names from Coversight
+        const postingDateRaw = row['Posting Date'] || row['Date fulfilled'] || row['Issued date'] || row['Date created'];
         let postingDate = null;
         let postingDateStr = '';
         let commissionMonth = '';
         let commissionYear = 0;
+        
+        // Debug: Log first few missing dates
+        if (!postingDateRaw && stats.ordersCreated + stats.ordersUpdated < 5) {
+          console.log(`⚠️  Order ${salesOrderNum} missing date. Available date fields:`, 
+            Object.keys(row).filter(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('month')));
+        }
         
         if (postingDateRaw) {
           try {
@@ -299,7 +306,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         .trim();
       
       // Parse posting date for commission tracking (denormalized for fast queries)
-      const postingDateRaw2 = row['Posting Date'];
+      // Try multiple date field names from Coversight
+      const postingDateRaw2 = row['Posting Date'] || row['Date fulfilled'] || row['Issued date'] || row['Date created'];
       let postingDate2 = null;
       let postingDateStr2 = '';
       let commissionMonth2 = '';
