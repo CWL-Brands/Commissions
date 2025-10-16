@@ -387,7 +387,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         
         // Financial Data (LINE ITEM LEVEL)
         revenue: parseFloat(row['Revenue'] || 0),  // Line item revenue
-        unitPrice: parseFloat(row['Unit Price'] || 0),  // Price customer pays per unit
+        unitPrice: parseFloat(row['UNIT PRICE'] || row['Unit Price'] || 0),  // Price customer pays per unit (try UNIT PRICE first, fallback to Unit Price)
         invoicedCost: parseFloat(row['Invoiced cost'] || 0),  // Cost of the product/line item
         margin: parseFloat(row['Margin'] || 0),  // Dollar amount of margin from line item
         quantity: parseFloat(row['Shipped Quantity'] || 0),  // Unit quantity of line item

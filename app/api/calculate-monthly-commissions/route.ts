@@ -337,36 +337,63 @@ export async function POST(request: NextRequest) {
 
       // Save commission record
       const commissionId = `${order.salesPerson}_${commissionMonth}_order_${order.salesOrderId}`;
-      await adminDb.collection('monthly_commissions').doc(commissionId).set({
-        id: commissionId,
-        repId: rep.id,
-        salesPerson: order.salesPerson,
-        repName: rep.name,
-        repTitle: rep.title,
-        
-        orderId: order.salesOrderId,
-        orderNum: order.num,
-        customerId: order.customerId,
-        customerName: order.customerName,
-        accountType: accountType,
-        
-        customerSegment: customerSegment,
-        customerStatus: customerStatus,
-        
-        orderRevenue: commissionRules?.useOrderValue ? orderAmount : order.revenue,
-        orderValue: order.orderValue || order.revenue,
-        commissionRate: rate,
-        commissionAmount: commissionAmount,
-        
-        orderDate: order.postingDate,
-        postingDate: order.postingDate,
-        commissionMonth: commissionMonth,
-        commissionYear: year,
-        
-        calculatedAt: new Date(),
-        paidStatus: 'pending',
-        notes: `${accountType} - ${customerStatus} - ${customerSegment}`
-      });
+      const commissionRef = adminDb.collection('monthly_commissions').doc(commissionId);
+      
+      // Check if this commission already exists and has a manual override
+      const existingCommission = await commissionRef.get();
+      const hasManualOverride = existingCommission.exists && existingCommission.data()?.isOverride === true;
+      
+      if (hasManualOverride) {
+        // Preserve manual override - only update non-override fields
+        console.log(`⚠️  PRESERVING MANUAL OVERRIDE for Order ${order.num} - keeping adjusted commission`);
+        await commissionRef.update({
+          // Update metadata fields only, preserve commission amount and override data
+          repName: rep.name,
+          repTitle: rep.title,
+          customerName: order.customerName,
+          accountType: accountType,
+          customerSegment: customerSegment,
+          customerStatus: customerStatus,
+          orderRevenue: commissionRules?.useOrderValue ? orderAmount : order.revenue,
+          orderValue: order.orderValue || order.revenue,
+          commissionRate: rate,
+          // DO NOT update: commissionAmount, isOverride, overrideReason, manualAdjustment, etc.
+          calculatedAt: new Date(),
+          notes: `${accountType} - ${customerStatus} - ${customerSegment} [OVERRIDE PRESERVED]`
+        });
+      } else {
+        // No override - normal save/update
+        await commissionRef.set({
+          id: commissionId,
+          repId: rep.id,
+          salesPerson: order.salesPerson,
+          repName: rep.name,
+          repTitle: rep.title,
+          
+          orderId: order.salesOrderId,
+          orderNum: order.num,
+          customerId: order.customerId,
+          customerName: order.customerName,
+          accountType: accountType,
+          
+          customerSegment: customerSegment,
+          customerStatus: customerStatus,
+          
+          orderRevenue: commissionRules?.useOrderValue ? orderAmount : order.revenue,
+          orderValue: order.orderValue || order.revenue,
+          commissionRate: rate,
+          commissionAmount: commissionAmount,
+          
+          orderDate: order.postingDate,
+          postingDate: order.postingDate,
+          commissionMonth: commissionMonth,
+          commissionYear: year,
+          
+          calculatedAt: new Date(),
+          paidStatus: 'pending',
+          notes: `${accountType} - ${customerStatus} - ${customerSegment}`
+        });
+      }
 
       // Calculate spiffs from line items
       let orderSpiffTotal = 0;
