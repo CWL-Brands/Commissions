@@ -51,6 +51,7 @@ interface MonthlyCommissionDetail {
   commissionRate: number;
   commissionAmount: number;
   orderDate: any;
+  hasSpiff?: boolean; // Flag to indicate if order has spiff overrides
 }
 
 interface OrderLineItem {
@@ -188,6 +189,7 @@ export default function ReportsPage() {
           
           const itemsSnapshot = await getDocs(itemsQuery);
           let totalCommission = 0;
+          let hasSpiff = false;
           
           itemsSnapshot.forEach((doc) => {
             const data = doc.data();
@@ -208,6 +210,7 @@ export default function ReportsPage() {
             // Check for spiff override
             const spiff = activeSpiffs.get(productNumber);
             if (spiff) {
+              hasSpiff = true; // Mark that this order has a spiff
               const typeNormalized = (spiff.incentiveType || '').toLowerCase().replace(/[^a-z]/g, '');
               if (typeNormalized === 'flat') {
                 totalCommission += quantity * spiff.incentiveValue;
@@ -220,8 +223,8 @@ export default function ReportsPage() {
             }
           });
           
-          // Return updated detail with recalculated commission
-          return { ...detail, commissionAmount: totalCommission };
+          // Return updated detail with recalculated commission and spiff flag
+          return { ...detail, commissionAmount: totalCommission, hasSpiff: hasSpiff };
         } catch (error) {
           console.error(`Error recalculating commission for order ${detail.orderNum}:`, error);
           return detail; // Return original on error
@@ -1101,13 +1104,18 @@ export default function ReportsPage() {
       onClick={() => toggleOrder(order.orderNum, order.commissionRate)}
     >
       <td className="px-4 py-3 text-sm font-medium text-gray-900">
-        <div className="flex items-center">
+        <div className="flex items-center gap-2">
           {expandedOrders.has(order.orderNum) ? (
-            <ChevronDown className="w-4 h-4 mr-2 text-gray-600" />
+            <ChevronDown className="w-4 h-4 text-gray-600" />
           ) : (
-            <ChevronRight className="w-4 h-4 mr-2 text-gray-600" />
+            <ChevronRight className="w-4 h-4 text-gray-600" />
           )}
-          {order.orderNum}
+          <span>{order.orderNum}</span>
+          {order.hasSpiff && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+              🎁 Spiff
+            </span>
+          )}
         </div>
       </td>
       <td className="px-4 py-3 text-sm text-gray-600">
