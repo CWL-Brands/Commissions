@@ -76,8 +76,10 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       continue;
     }
     
-    const revenue = new Decimal(row['Revenue'] || 0);
-    const orderValue = new Decimal(row['Order value'] || 0);
+    // Revenue is "Total Price" in Coversight export (line item revenue)
+    const revenue = new Decimal(row['Total Price'] || row['Revenue'] || row['Fulfilled revenue'] || 0);
+    // Order value - use same as revenue for line items (will be aggregated at order level)
+    const orderValue = new Decimal(row['Total Price'] || row['Order value'] || row['Fulfilled revenue'] || 0);
     
     if (!orderTotals.has(salesOrderNum)) {
       orderTotals.set(salesOrderNum, { revenue: new Decimal(0), orderValue: new Decimal(0), lineCount: 0 });
