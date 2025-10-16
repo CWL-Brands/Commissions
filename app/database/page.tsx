@@ -55,10 +55,17 @@ export default function DatabasePage() {
   const { user, isAdmin, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'collections' | 'monthly' | 'imports' | 'apis'>('overview');
-  const [sortField, setSortField] = useState<string>('orderDate');
+  const [sortField, setSortField] = useState<string>('orderNum');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [monthlyCommissions, setMonthlyCommissions] = useState<any[]>([]);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
+  
+  // Filter and search state
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [filterRep, setFilterRep] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterSegment, setFilterSegment] = useState<string>('all');
+  const [filterAccountType, setFilterAccountType] = useState<string>('all');
   
   const [collectionStats, setCollectionStats] = useState<CollectionStats[]>([]);
   const [importLogs, setImportLogs] = useState<ImportLog[]>([]);
@@ -308,7 +315,9 @@ export default function DatabasePage() {
         manualAdjustmentNote: adjustmentNote || 'Manual adjustment',
         commissionAmount: newAmount,
         adjustedAt: new Date().toISOString(),
-        adjustedBy: user?.email || 'admin'
+        adjustedBy: user?.email || 'admin',
+        isOverride: true,
+        overrideReason: adjustmentNote || 'Manual adjustment'
       });
 
       toast.success(`Adjustment applied: ${adjustment >= 0 ? '+' : ''}$${adjustment.toFixed(2)}`);
@@ -334,7 +343,40 @@ export default function DatabasePage() {
     }
   };
 
-  const sortedCommissions = [...monthlyCommissions].sort((a, b) => {
+  // Filter and search logic
+  const filteredCommissions = monthlyCommissions.filter((comm) => {
+    // Search filter (all fields)
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      const matchesSearch = 
+        (comm.orderNum || '').toString().toLowerCase().includes(search) ||
+        (comm.customerName || '').toLowerCase().includes(search) ||
+        (comm.repName || '').toLowerCase().includes(search) ||
+        (comm.commissionMonth || '').toLowerCase().includes(search) ||
+        (comm.accountType || '').toLowerCase().includes(search) ||
+        (comm.customerSegment || '').toLowerCase().includes(search) ||
+        (comm.customerStatus || '').toLowerCase().includes(search);
+      
+      if (!matchesSearch) return false;
+    }
+    
+    // Rep filter
+    if (filterRep !== 'all' && comm.repName !== filterRep) return false;
+    
+    // Status filter
+    if (filterStatus !== 'all' && comm.customerStatus !== filterStatus) return false;
+    
+    // Segment filter
+    if (filterSegment !== 'all' && comm.customerSegment !== filterSegment) return false;
+    
+    // Account Type filter
+    if (filterAccountType !== 'all' && comm.accountType !== filterAccountType) return false;
+    
+    return true;
+  });
+
+  // Sort filtered results
+  const sortedCommissions = [...filteredCommissions].sort((a, b) => {
     let aVal = a[sortField];
     let bVal = b[sortField];
     
@@ -348,6 +390,12 @@ export default function DatabasePage() {
     if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
     return 0;
   });
+  
+  // Get unique values for filter dropdowns
+  const uniqueReps = Array.from(new Set(monthlyCommissions.map(c => c.repName).filter(Boolean))).sort();
+  const uniqueStatuses = Array.from(new Set(monthlyCommissions.map(c => c.customerStatus).filter(Boolean))).sort();
+  const uniqueSegments = Array.from(new Set(monthlyCommissions.map(c => c.customerSegment).filter(Boolean))).sort();
+  const uniqueAccountTypes = Array.from(new Set(monthlyCommissions.map(c => c.accountType).filter(Boolean))).sort();
 
   useEffect(() => {
     if (!authLoading && !isAdmin) {
@@ -648,9 +696,70 @@ export default function DatabasePage() {
               </div>
             ) : (
               <div>
+                {/* Search and Filters */}
+                <div className="mb-6 space-y-4">
+                  {/* Search Bar */}
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Search all fields (order #, customer, rep, month, etc.)..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="input w-full"
+                    />
+                  </div>
+                  
+                  {/* Filter Dropdowns */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <select
+                      value={filterRep}
+                      onChange={(e) => setFilterRep(e.target.value)}
+                      className="input"
+                    >
+                      <option value="all">All Reps</option>
+                      {uniqueReps.map(rep => (
+                        <option key={rep} value={rep}>{rep}</option>
+                      ))}
+                    </select>
+                    
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className="input"
+                    >
+                      <option value="all">All Statuses</option>
+                      {uniqueStatuses.map(status => (
+                        <option key={status} value={status}>{status}</option>
+                      ))}
+                    </select>
+                    
+                    <select
+                      value={filterSegment}
+                      onChange={(e) => setFilterSegment(e.target.value)}
+                      className="input"
+                    >
+                      <option value="all">All Segments</option>
+                      {uniqueSegments.map(segment => (
+                        <option key={segment} value={segment}>{segment}</option>
+                      ))}
+                    </select>
+                    
+                    <select
+                      value={filterAccountType}
+                      onChange={(e) => setFilterAccountType(e.target.value)}
+                      className="input"
+                    >
+                      <option value="all">All Account Types</option>
+                      {uniqueAccountTypes.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
                 <div className="mb-4 flex items-center justify-between">
                   <p className="text-sm text-gray-600">
-                    Showing {sortedCommissions.length} commission records
+                    Showing {sortedCommissions.length} of {monthlyCommissions.length} commission records
                   </p>
                   <p className="text-sm font-semibold text-gray-900">
                     Total: ${sortedCommissions.reduce((sum, c) => sum + (c.commissionAmount || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
@@ -660,17 +769,17 @@ export default function DatabasePage() {
                   <table className="table">
                     <thead>
                       <tr>
-                        <th onClick={() => handleSort('commissionMonth')} className="cursor-pointer hover:bg-gray-100">
-                          Month {sortField === 'commissionMonth' && (sortDirection === 'asc' ? '↑' : '↓')}
-                        </th>
-                        <th onClick={() => handleSort('repName')} className="cursor-pointer hover:bg-gray-100">
-                          Rep {sortField === 'repName' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        <th onClick={() => handleSort('orderNum')} className="cursor-pointer hover:bg-gray-100">
+                          Order # {sortField === 'orderNum' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th onClick={() => handleSort('customerName')} className="cursor-pointer hover:bg-gray-100">
                           Customer {sortField === 'customerName' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
-                        <th onClick={() => handleSort('orderNum')} className="cursor-pointer hover:bg-gray-100">
-                          Order # {sortField === 'orderNum' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        <th onClick={() => handleSort('repName')} className="cursor-pointer hover:bg-gray-100">
+                          Rep {sortField === 'repName' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th onClick={() => handleSort('commissionMonth')} className="cursor-pointer hover:bg-gray-100">
+                          Month {sortField === 'commissionMonth' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th onClick={() => handleSort('accountType')} className="cursor-pointer hover:bg-gray-100">
                           Account Type {sortField === 'accountType' && (sortDirection === 'asc' ? '↑' : '↓')}
@@ -696,10 +805,10 @@ export default function DatabasePage() {
                     <tbody>
                       {sortedCommissions.map((comm) => (
                         <tr key={comm.id} className="hover:bg-gray-50">
-                          <td className="text-sm font-medium">{comm.commissionMonth}</td>
-                          <td className="text-sm">{comm.repName}</td>
+                          <td className="text-sm font-mono font-semibold">{comm.orderNum}</td>
                           <td className="text-sm">{comm.customerName}</td>
-                          <td className="text-sm font-mono">{comm.orderNum}</td>
+                          <td className="text-sm">{comm.repName}</td>
+                          <td className="text-sm font-medium">{comm.commissionMonth}</td>
                           <td>
                             <span className={`px-2 py-1 text-xs rounded-full ${
                               comm.accountType === 'Distributor' ? 'bg-blue-100 text-blue-800' :
