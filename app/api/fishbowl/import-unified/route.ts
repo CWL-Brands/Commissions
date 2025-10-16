@@ -93,7 +93,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   
   let batch = adminDb.batch();
   let batchCount = 0;
-  const MAX_BATCH_SIZE = 250; // Reduced from 500 to avoid timeouts
+  const MAX_BATCH_SIZE = 400; // Firestore hard limit is 500, use 400 for safety
   
   let rowIndex = 0;
   const totalRows = data.length;
@@ -279,8 +279,12 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       // === 3. CREATE SOITEM (LINE ITEM) ===
       // Each row is a unique line item
       // Sales Order Product ID/Number is the unique line item ID from Fishbowl
-      const productLineId = row['Sales Order Product Number'] || row['Sales Order Product ID'];
+      const productLineId = row['Sales Order Product Number'] || row['Sales Order Product ID'] || row['SO item Product Id'];
       if (!productLineId) {
+        // Log first few skipped items to debug field name issues
+        if (stats.skipped < 5) {
+          console.log(`⚠️  Skipping row ${stats.processed} - missing product line ID. Available fields:`, Object.keys(row).filter(k => k.toLowerCase().includes('product')));
+        }
         stats.skipped++;
         continue;
       }
@@ -403,7 +407,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       stats.itemsCreated++;
       batchCount++;
       
-      // Commit in smaller batches to avoid timeout
+      // CRITICAL: Check batch size after EVERY operation
       if (batchCount >= MAX_BATCH_SIZE) {
         try {
           await batch.commit();
@@ -417,6 +421,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           batchCount = 0;
         }
       }
+      
       
     } catch (error: any) {
       console.error(`❌ Error processing row ${stats.processed}:`, error.message);
