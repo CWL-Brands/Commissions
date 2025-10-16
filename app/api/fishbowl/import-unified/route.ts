@@ -183,8 +183,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           .trim();
         
         // Parse posting date for commission tracking
-        // Try multiple date field names from Coversight
-        const postingDateRaw = row['Posting Date'] || row['Date fulfilled'] || row['Issued date'] || row['Date created'];
+        // Try multiple date field names from Coversight (Date fulfillment is the primary field)
+        const postingDateRaw = row['Date fulfillment'] || row['Date fulfilled'] || row['Date last fulfillment'] || row['Issued date'] || row['Date created'];
         let postingDate = null;
         let postingDateStr = '';
         let commissionMonth = '';
@@ -306,8 +306,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         .trim();
       
       // Parse posting date for commission tracking (denormalized for fast queries)
-      // Try multiple date field names from Coversight
-      const postingDateRaw2 = row['Posting Date'] || row['Date fulfilled'] || row['Issued date'] || row['Date created'];
+      // Try multiple date field names from Coversight (Date fulfillment is the primary field)
+      const postingDateRaw2 = row['Date fulfillment'] || row['Date fulfilled'] || row['Date last fulfillment'] || row['Issued date'] || row['Date created'];
       let postingDate2 = null;
       let postingDateStr2 = '';
       let commissionMonth2 = '';
@@ -384,12 +384,12 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         partNumber: row['Part Number'] || '',  // Name of the SKU in Fishbowl
         partId: row['Part id'] || '',  // ID associated to the part number
         product: row['Product'] || '',
-        productC1: row['Product Custom 1'] || row['Product c1'] || '',  // Product category 1
-        productC2: row['Product Custom 2'] || row['Product c2'] || '',  // Product category 2
-        productC3: row['Product Custom 3'] || row['Product c3'] || '',  // Product category 3
-        productC4: row['Product Custom 4'] || row['Product c4'] || '',  // Product category 4
-        productC5: row['Product Custom 5'] || row['Product c5'] || '',  // Product category 5
-        productDesc: row['Product desc'] || row['Part Description'] || '',
+        productC1: row['Product Custom Field 1'] || row['Product Custom 1'] || row['Product c1'] || '',  // Product category 1
+        productC2: row['Product Custom Field 2'] || row['Product Custom 2'] || row['Product c2'] || '',  // Product category 2
+        productC3: row['Product Custom Field 3'] || row['Product Custom 3'] || row['Product c3'] || '',  // Product category 3
+        productC4: row['Product Custom Field 4'] || row['Product Custom 4'] || row['Product c4'] || '',  // Product category 4
+        productC5: row['Product c5'] || row['Product Custom 5'] || row['Product Custom Field 5'] || '',  // Product category 5
+        productDesc: row['Product description'] || row['Product desc'] || row['Part Description'] || '',
         description: row['Sales Order Item Description'] || '',
         itemType: row['Sales Order Item Type'] || '',
         
@@ -404,7 +404,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         unitPrice: parseFloat(row['UNIT PRICE'] || row['Unit price'] || row['Unit Price'] || 0),  // Price customer pays per unit
         invoicedCost: parseFloat(row['Total cost'] || row['Invoiced cost'] || 0),  // Cost of the product/line item
         margin: parseFloat(row['Sales Order Product Margin'] || row['Margin'] || 0),  // Dollar amount of margin from line item
-        quantity: parseFloat(row['Shipped Quantity'] || 0),  // Unit quantity of line item
+        quantity: parseFloat(row['Qty fulfilled'] || row['Shipped Quantity'] || 0),  // Unit quantity of line item
         
         // Import metadata
         importedAt: Timestamp.now(),
