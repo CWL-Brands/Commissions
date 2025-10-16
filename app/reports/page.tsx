@@ -226,7 +226,14 @@ export default function ReportsPage() {
           });
           
           // Return updated detail with recalculated commission and spiff flag
-          return { ...detail, commissionAmount: totalCommission, hasSpiff: hasSpiff };
+          // IMPORTANT: Don't override manual adjustments!
+          if (detail.isOverride) {
+            // Keep the manually adjusted commission amount
+            return { ...detail, hasSpiff: hasSpiff };
+          } else {
+            // Use recalculated commission
+            return { ...detail, commissionAmount: totalCommission, hasSpiff: hasSpiff };
+          }
         } catch (error) {
           console.error(`Error recalculating commission for order ${detail.orderNum}:`, error);
           return detail; // Return original on error
@@ -388,11 +395,18 @@ export default function ReportsPage() {
       const totalLineItemCommission = items.reduce((sum, item) => sum + item.commissionAmount, 0);
       
       // Update the order's commission amount in monthlyDetails to reflect actual line item totals
-      setMonthlyDetails(prev => prev.map(detail => 
-        detail.orderNum === orderNum 
-          ? { ...detail, commissionAmount: totalLineItemCommission }
-          : detail
-      ));
+      // IMPORTANT: Don't override manual adjustments!
+      setMonthlyDetails(prev => prev.map(detail => {
+        if (detail.orderNum === orderNum) {
+          // If this order has a manual override, keep the override amount
+          if (detail.isOverride) {
+            return detail; // Don't change the commission amount
+          }
+          // Otherwise, update with calculated line item total
+          return { ...detail, commissionAmount: totalLineItemCommission };
+        }
+        return detail;
+      }));
       
       // Update the map
       setOrderLineItems(prev => new Map(prev).set(orderNum, items));
@@ -1074,6 +1088,11 @@ export default function ReportsPage() {
                                       {customer.orders.some(order => order.hasSpiff) && (
                                         <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800 font-medium">
                                           🎁 Spiff
+                                        </span>
+                                      )}
+                                      {customer.orders.some(order => order.isOverride) && (
+                                        <span className="px-2 py-0.5 text-xs rounded-full bg-orange-100 text-orange-800 font-medium">
+                                          ⚠️ Override
                                         </span>
                                       )}
                                       <span className="text-xs text-gray-600">
