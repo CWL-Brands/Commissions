@@ -25,6 +25,7 @@ interface ImportStats {
   ordersCreated: number;
   ordersUpdated: number;
   itemsCreated: number;
+  itemsUpdated: number;
   skipped: number;
 }
 
@@ -49,6 +50,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
     ordersCreated: 0,
     ordersUpdated: 0,
     itemsCreated: 0,
+    itemsUpdated: 0,
     skipped: 0
   };
   
@@ -108,7 +110,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       console.log(`📊 Progress: ${stats.processed} of ${totalRows} (${((stats.processed/totalRows)*100).toFixed(1)}%)`);
       console.log(`   Customers: ${stats.customersCreated} created, ${stats.customersUpdated} updated`);
       console.log(`   Orders: ${stats.ordersCreated} created, ${stats.ordersUpdated} updated`);
-      console.log(`   Items: ${stats.itemsCreated} created, Skipped: ${stats.skipped}`);
+      console.log(`   Items: ${stats.itemsCreated} created, ${stats.itemsUpdated} updated, Skipped: ${stats.skipped}`);
     }
     
     
@@ -301,6 +303,9 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       const itemDocId = `soitem_${productLineId}`;
       const itemRef = adminDb.collection('fishbowl_soitems').doc(itemDocId);
       
+      // Check if item exists to track creates vs updates
+      const existingItem = await itemRef.get();
+      
       // Sanitize customer ID for consistency
       const sanitizedCustomerId = String(customerId)
         .replace(/\//g, '_')
@@ -413,8 +418,13 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         source: 'fishbowl_unified',
       };
       
+      // Use .set() to create or overwrite (not .update() which fails if doc doesn't exist)
       batch.set(itemRef, itemData);
-      stats.itemsCreated++;
+      if (existingItem.exists) {
+        stats.itemsUpdated++;
+      } else {
+        stats.itemsCreated++;
+      }
       batchCount++;
       
       // CRITICAL: Check batch size after EVERY operation
@@ -455,7 +465,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   console.log(`   Rows processed: ${stats.processed}`);
   console.log(`   Customers: ${stats.customersCreated} created, ${stats.customersUpdated} updated`);
   console.log(`   Orders: ${stats.ordersCreated} created, ${stats.ordersUpdated} updated`);
-  console.log(`   Line Items: ${stats.itemsCreated} created`);
+  console.log(`   Line Items: ${stats.itemsCreated} created, ${stats.itemsUpdated} updated`);
   console.log(`   Skipped: ${stats.skipped}\n`);
   
   return stats;
@@ -481,8 +491,17 @@ export async function POST(req: NextRequest) {
     
     return NextResponse.json({
       success: true,
-      stats,
-      message: `Successfully imported ${stats.itemsCreated} line items, ${stats.customersCreated + stats.customersUpdated} customers, ${stats.ordersCreated + stats.ordersUpdated} orders`
+      message: 'Import completed successfully',
+      stats: {
+        rowsProcessed: stats.processed,
+        customersCreated: stats.customersCreated,
+        customersUpdated: stats.customersUpdated,
+        ordersCreated: stats.ordersCreated,
+        ordersUpdated: stats.ordersUpdated,
+        itemsCreated: stats.itemsCreated,
+        itemsUpdated: stats.itemsUpdated,
+        skipped: stats.skipped
+      }
     });
     
   } catch (error: any) {
