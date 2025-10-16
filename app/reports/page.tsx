@@ -52,6 +52,8 @@ interface MonthlyCommissionDetail {
   commissionAmount: number;
   orderDate: any;
   hasSpiff?: boolean; // Flag to indicate if order has spiff overrides
+  isOverride?: boolean; // Flag to indicate if commission was manually overridden
+  overrideReason?: string; // Reason for manual override
 }
 
 interface OrderLineItem {
@@ -1121,6 +1123,11 @@ export default function ReportsPage() {
               🎁 Spiff
             </span>
           )}
+          {order.isOverride && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+              ⚠️ Override
+            </span>
+          )}
         </div>
       </td>
       <td className="px-4 py-3 text-sm text-gray-600">
@@ -1164,6 +1171,16 @@ export default function ReportsPage() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Override Reason Display */}
+            {order.isOverride && order.overrideReason && (
+              <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <span className="text-orange-600 font-semibold text-sm">⚠️ Override Reason:</span>
+                  <span className="text-orange-900 text-sm">{order.overrideReason}</span>
+                </div>
+              </div>
+            )}
           </div>
         </td>
       </tr>
