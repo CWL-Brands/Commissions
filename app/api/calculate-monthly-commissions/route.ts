@@ -131,26 +131,40 @@ export async function POST(request: NextRequest) {
     console.log(`📋 Rep keys in map:`, Array.from(repsMap.keys()).join(', '));
 
     // Query Fishbowl sales orders for the specified month
+    console.log(`\n🔍 Querying orders for commissionMonth: "${commissionMonth}"`);
+    
     let ordersQuery = adminDb.collection('fishbowl_sales_orders')
       .where('commissionMonth', '==', commissionMonth);
     
     if (salesPerson) {
+      console.log(`   Filtering by salesPerson: "${salesPerson}"`);
       ordersQuery = ordersQuery.where('salesPerson', '==', salesPerson);
     }
 
     const ordersSnapshot = await ordersQuery.get();
     
     if (ordersSnapshot.empty) {
+      console.log(`\n❌ NO ORDERS FOUND for commissionMonth="${commissionMonth}"`);
+      console.log(`\n🔍 Checking what commission months exist in database...`);
+      
+      // Debug: Check what commission months actually exist
+      const allOrdersSnapshot = await adminDb.collection('fishbowl_sales_orders').limit(10).get();
+      console.log(`   Total orders in collection: ${allOrdersSnapshot.size}`);
+      allOrdersSnapshot.forEach(doc => {
+        const data = doc.data();
+        console.log(`   Sample order: ${data.num} | commissionMonth: "${data.commissionMonth}" | postingDate: ${data.postingDateStr}`);
+      });
+      
       return NextResponse.json({
         success: true,
-        message: 'No orders found for the specified period',
+        message: `No orders found for commissionMonth="${commissionMonth}". Check console for debug info.`,
         processed: 0,
         commissionsCalculated: 0,
         totalCommission: 0
       });
     }
 
-    console.log(`Found ${ordersSnapshot.size} orders to process`);
+    console.log(`✅ Found ${ordersSnapshot.size} orders to process`);
 
     let processed = 0;
     let commissionsCalculated = 0;
