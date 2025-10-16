@@ -110,7 +110,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       console.log(`📊 Progress: ${stats.processed} of ${totalRows} (${((stats.processed/totalRows)*100).toFixed(1)}%)`);
       console.log(`   Customers: ${stats.customersCreated} created, ${stats.customersUpdated} updated`);
       console.log(`   Orders: ${stats.ordersCreated} created, ${stats.ordersUpdated} updated`);
-      console.log(`   Items: ${stats.itemsCreated} created, ${stats.itemsUpdated} updated, Skipped: ${stats.skipped}`);
+      console.log(`   Items: ${stats.itemsCreated} created/updated, Skipped: ${stats.skipped}`);
     }
     
     
@@ -303,9 +303,6 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       const itemDocId = `soitem_${productLineId}`;
       const itemRef = adminDb.collection('fishbowl_soitems').doc(itemDocId);
       
-      // Check if item exists to track creates vs updates
-      const existingItem = await itemRef.get();
-      
       // Sanitize customer ID for consistency
       const sanitizedCustomerId = String(customerId)
         .replace(/\//g, '_')
@@ -418,13 +415,10 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         source: 'fishbowl_unified',
       };
       
-      // Use .set() to create or overwrite (not .update() which fails if doc doesn't exist)
+      // Use .set() with NO merge to completely overwrite existing documents
+      // This ensures all fields are updated, not just merged
       batch.set(itemRef, itemData);
-      if (existingItem.exists) {
-        stats.itemsUpdated++;
-      } else {
-        stats.itemsCreated++;
-      }
+      stats.itemsCreated++; // Track as "created" (includes overwrites)
       batchCount++;
       
       // CRITICAL: Check batch size after EVERY operation
@@ -465,7 +459,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   console.log(`   Rows processed: ${stats.processed}`);
   console.log(`   Customers: ${stats.customersCreated} created, ${stats.customersUpdated} updated`);
   console.log(`   Orders: ${stats.ordersCreated} created, ${stats.ordersUpdated} updated`);
-  console.log(`   Line Items: ${stats.itemsCreated} created, ${stats.itemsUpdated} updated`);
+  console.log(`   Line Items: ${stats.itemsCreated} created/updated`);
   console.log(`   Skipped: ${stats.skipped}\n`);
   
   return stats;
