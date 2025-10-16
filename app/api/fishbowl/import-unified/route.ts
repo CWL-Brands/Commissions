@@ -137,22 +137,22 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         
         const customerData: any = {
           id: customerDocId,  // Fishbowl Customer ID
-          name: row['Customer'] || '',  // Customer Name
+          name: row['Customer Name'] || row['Customer'] || '',  // Customer Name (try both formats)
           accountNumber: row['Account Number'] || '',  // Customer Account Number in Fishbowl
           // PRESERVE existing accountType if it exists, otherwise use Fishbowl value
           accountType: existingData?.accountType || row['Account Type'] || '',
           // PRESERVE manual sales rep assignment (fishbowlUsername) - don't overwrite with import
           fishbowlUsername: existingData?.fishbowlUsername || '',
           companyId: row['Company id'] || '',
-          companyName: row['Company name'] || '',
+          companyName: row['Company Name'] || row['Company name'] || '',
           parentCompanyId: row['Parent Company ID'] || '',
           parentCustomerName: row['Parent Customer Name'] || '',
-          shippingCity: row['Shipping City'] || '',
-          shippingState: row['Shipping State'] || '',
-          shippingAddress: row['Shipping Address'] || '',
+          shippingCity: row['Shipping City'] || row['Billing City'] || '',
+          shippingState: row['Shipping State'] || row['Billing State'] || '',
+          shippingAddress: row['Shipping Address'] || row['Billing Address'] || '',
           shippingCountry: row['Shipping Country'] || '',
           shipToName: row['Ship to name'] || '',
-          shipToZip: row['Ship to zip'] || '',
+          shipToZip: row['Ship to zip'] || row['Billing Zip'] || '',
           customerContact: row['Customer contact'] || '',
           updatedAt: Timestamp.now(),
           source: 'fishbowl_unified',
@@ -241,7 +241,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
           fishbowlNum: String(salesOrderNum),
           salesOrderId: String(salesOrderId), // Sales Order ID (Fishbowl assigned ID)
           customerId: sanitizedCustomerId, // Customer ID (Fishbowl)
-          customerName: row['Customer'] || '',  // Customer Name
+          customerName: row['Customer Name'] || row['Customer'] || '',  // Customer Name (try both formats)
           salesPerson: row['Sales person'] || '',  // Sales Person (long name)
           salesRep: row['Sales Rep'] || '',  // Sales Rep (short name)
           
@@ -349,7 +349,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         
         // Customer Info (denormalized for fast queries)
         customerId: sanitizedCustomerId, // Customer ID (Fishbowl)
-        customerName: row['Customer'] || '',  // Customer Name
+        customerName: row['Customer Name'] || row['Customer'] || '',  // Customer Name (try both formats)
         accountNumber: row['Account Number'] || '',  // Customer Account Number
         accountType: row['Account Type'] || '',
         
@@ -371,25 +371,26 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         partNumber: row['Part Number'] || '',  // Name of the SKU in Fishbowl
         partId: row['Part id'] || '',  // ID associated to the part number
         product: row['Product'] || '',
-        productC1: row['Product c1'] || '',  // Product category 1
-        productC2: row['Product c2'] || '',  // Product category 2
-        productC3: row['Product c3'] || '',  // Product category 3
-        productC4: row['Product c4'] || '',  // Product category 4
-        productC5: row['Product c5'] || '',  // Product category 5
-        productDesc: row['Product desc'] || '',
+        productC1: row['Product Custom 1'] || row['Product c1'] || '',  // Product category 1
+        productC2: row['Product Custom 2'] || row['Product c2'] || '',  // Product category 2
+        productC3: row['Product Custom 3'] || row['Product c3'] || '',  // Product category 3
+        productC4: row['Product Custom 4'] || row['Product c4'] || '',  // Product category 4
+        productC5: row['Product Custom 5'] || row['Product c5'] || '',  // Product category 5
+        productDesc: row['Product desc'] || row['Part Description'] || '',
         description: row['Sales Order Item Description'] || '',
         itemType: row['Sales Order Item Type'] || '',
         
-        // Shipping Info
-        shippingCity: row['Shipping City'] || '',
-        shippingState: row['Shipping State'] || '',
+        // Shipping Info (try Billing fields as fallback)
+        shippingCity: row['Shipping City'] || row['Billing City'] || '',
+        shippingState: row['Shipping State'] || row['Billing State'] || '',
         shippingItemId: row['Shipping Item ID'] || '',
         
         // Financial Data (LINE ITEM LEVEL)
-        revenue: parseFloat(row['Revenue'] || 0),  // Line item revenue
-        unitPrice: parseFloat(row['UNIT PRICE'] || row['Unit Price'] || 0),  // Price customer pays per unit (try UNIT PRICE first, fallback to Unit Price)
-        invoicedCost: parseFloat(row['Invoiced cost'] || 0),  // Cost of the product/line item
-        margin: parseFloat(row['Margin'] || 0),  // Dollar amount of margin from line item
+        // Support both Coversight field names and standard names
+        revenue: parseFloat(row['Total Price'] || row['Revenue'] || 0),  // Line item revenue
+        unitPrice: parseFloat(row['UNIT PRICE'] || row['Unit price'] || row['Unit Price'] || 0),  // Price customer pays per unit
+        invoicedCost: parseFloat(row['Total cost'] || row['Invoiced cost'] || 0),  // Cost of the product/line item
+        margin: parseFloat(row['Sales Order Product Margin'] || row['Margin'] || 0),  // Dollar amount of margin from line item
         quantity: parseFloat(row['Shipped Quantity'] || 0),  // Unit quantity of line item
         
         // Import metadata
