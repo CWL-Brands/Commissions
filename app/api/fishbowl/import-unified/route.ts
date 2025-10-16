@@ -93,6 +93,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   
   let batch = adminDb.batch();
   let batchCount = 0;
+  const MAX_BATCH_SIZE = 250; // Reduced from 500 to avoid timeouts
   
   let rowIndex = 0;
   const totalRows = data.length;
@@ -111,9 +112,9 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
     
     try {
       // Extract key fields
-      const customerId = row['Customer id'];
+      const customerId = row['Customer Id'] || row['Customer id'];
       const salesOrderNum = row['Sales order Number'];
-      const salesOrderId = row['Sales Order ID'];
+      const salesOrderId = row['Sales order Id'] || row['Sales Order ID'];
       
       // Skip if missing critical data
       if (!customerId || !salesOrderNum || !salesOrderId) {
@@ -277,8 +278,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       
       // === 3. CREATE SOITEM (LINE ITEM) ===
       // Each row is a unique line item
-      // Sales Order Product ID is the unique line item ID from Fishbowl
-      const productLineId = row['Sales Order Product ID'];
+      // Sales Order Product ID/Number is the unique line item ID from Fishbowl
+      const productLineId = row['Sales Order Product Number'] || row['Sales Order Product ID'];
       if (!productLineId) {
         stats.skipped++;
         continue;
@@ -402,12 +403,19 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       stats.itemsCreated++;
       batchCount++;
       
-      // Commit in batches of 500
-      if (batchCount >= 500) {
-        await batch.commit();
-        console.log(`💾 Committed batch: ${stats.customersCreated + stats.customersUpdated} customers, ${stats.ordersCreated + stats.ordersUpdated} orders, ${stats.itemsCreated} items`);
-        batch = adminDb.batch();
-        batchCount = 0;
+      // Commit in smaller batches to avoid timeout
+      if (batchCount >= MAX_BATCH_SIZE) {
+        try {
+          await batch.commit();
+          console.log(`💾 Committed batch: ${stats.customersCreated + stats.customersUpdated} customers, ${stats.ordersCreated + stats.ordersUpdated} orders, ${stats.itemsCreated} items`);
+          batch = adminDb.batch();
+          batchCount = 0;
+        } catch (error: any) {
+          console.error(`❌ Batch commit failed:`, error.message);
+          // Continue processing - don't fail entire import
+          batch = adminDb.batch();
+          batchCount = 0;
+        }
       }
       
     } catch (error: any) {
@@ -418,7 +426,14 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   
   // Commit remaining
   if (batchCount > 0) {
-    await batch.commit();
+    try {
+      console.log(`💾 Committing final batch of ${batchCount} operations...`);
+      await batch.commit();
+      console.log(`✅ Final batch committed successfully`);
+    } catch (error: any) {
+      console.error(`❌ Final batch commit failed:`, error.message);
+      throw error; // Re-throw on final batch to report the error
+    }
   }
   
   console.log(`\n✅ UNIFIED IMPORT COMPLETE!`);
