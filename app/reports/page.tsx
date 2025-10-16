@@ -1069,6 +1069,11 @@ export default function ReportsPage() {
                                       }`}>
                                         {customer.accountType}
                                       </span>
+                                      {customer.orders.some(order => order.hasSpiff) && (
+                                        <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800 font-medium">
+                                          🎁 Spiff
+                                        </span>
+                                      )}
                                       <span className="text-xs text-gray-600">
                                         {customer.commissionRate.toFixed(1)}% rate
                                       </span>
