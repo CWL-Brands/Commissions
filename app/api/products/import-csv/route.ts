@@ -43,55 +43,39 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      const productData = {
+        productNum: productNum.trim(),
+        productDescription: rowData['Product Description'] || rowData.ProductDescription || '',
+        category: rowData.Category || '',
+        productType: rowData['Product Type'] || rowData.ProductType || '',
+        size: rowData.Size || '',
+        uom: rowData.UOM || '',
+        notes: rowData.Notes || '',
+        isActive: true,
+        quarterlyBonusEligible: false, // Can be updated later
+        imageUrl: null,
+        imagePath: null,
+        updatedAt: new Date().toISOString(),
+      };
+
       // Check if product exists
       const existingQuery = await adminDb
         .collection('products')
-        .where('productNum', '==', productNum.trim())
+        .where('productNum', '==', productData.productNum)
         .limit(1)
         .get();
 
       if (!existingQuery.empty) {
-        // Update existing - only update CSV fields, preserve user settings
-        const existingData = existingQuery.docs[0].data();
+        // Update existing
         const docRef = existingQuery.docs[0].ref;
-        
-        const updateData: any = {
-          productNum: productNum.trim(),
-          productDescription: rowData['Product Description'] || rowData.ProductDescription || '',
-          category: rowData.Category || '',
-          productType: rowData['Product Type'] || rowData.ProductType || '',
-          size: rowData.Size || '',
-          uom: rowData.UOM || '',
-          updatedAt: new Date().toISOString(),
-        };
-        
-        // Only update notes if provided in CSV
-        if (rowData.Notes) {
-          updateData.notes = rowData.Notes;
-        }
-        
-        // Preserve existing user settings: isActive, quarterlyBonusEligible, imageUrl, imagePath
-        // These are NOT overwritten from CSV
-        
-        batch.update(docRef, updateData);
+        batch.update(docRef, productData);
         updated++;
       } else {
-        // Create new product with defaults
+        // Create new
         const docRef = adminDb.collection('products').doc();
         batch.set(docRef, {
-          productNum: productNum.trim(),
-          productDescription: rowData['Product Description'] || rowData.ProductDescription || '',
-          category: rowData.Category || '',
-          productType: rowData['Product Type'] || rowData.ProductType || '',
-          size: rowData.Size || '',
-          uom: rowData.UOM || '',
-          notes: rowData.Notes || '',
-          isActive: true, // Default for new products
-          quarterlyBonusEligible: false, // Default for new products
-          imageUrl: null,
-          imagePath: null,
+          ...productData,
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
         });
         imported++;
       }

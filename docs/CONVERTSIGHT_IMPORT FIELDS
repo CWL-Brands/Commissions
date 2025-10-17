@@ -1,0 +1,56 @@
+A	Year-month
+B	Date created
+C	Date fulfillment
+D	Issued date
+E	Date last fulfillment
+F	Product Creation Date
+G	Scheduled Fulfillment Date
+H	Date first ship
+I	Account ID
+J	Account type
+K	Billing Name
+L	Billing Address
+M	Billing City
+N	Billing State
+O	Billing Zip
+P	Company name
+Q	Customer Name
+R	Sales Rep
+S	Priority ID
+T	Part id
+U	Part Description
+V	Product ID
+W	Product
+X	Sales Rep Initials
+Y	Sales order Number
+Z	SO Status
+AA	Sales person
+AB	Sales Order ID
+AC	SO Item Product Number
+AD	SO Item ID
+AE	UOM Code
+AF	UOM Name
+AG	Product Custom Field 1
+AH	Product Custom Field 3
+AI	Customer id
+AJ	Company id
+AK	Product Custom Field 2
+AL	Product Custom Field 4
+AM	Product c5
+AN	Product description
+AO	Product Short Number
+AP	Sales Order Item Description
+AQ	Sales Order Item Status
+AR	SO Type
+AS	Account id
+AT	Account Type
+AU	Qty fulfilled
+AV	So ct
+AW	Unit price
+AX	Total Price
+AY	Total cost
+AZ	Sales Order Line Item
+BA	Fulfilled revenue
+BB	Fulfilled margin
+BC	Item Margin
+

@@ -109,6 +109,17 @@ export default function AppShell({ children }: AppShellProps) {
                     </Link>
 
                     <Link
+                      href={`/database${query}`}
+                      className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                        isActive('/database')
+                          ? 'bg-primary-50 text-primary-700 font-medium'
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      <Database className="w-4 h-4" /> Database
+                    </Link>
+
+                    <Link
                       href={`/team${query}`}
                       className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                         isActive('/team')
