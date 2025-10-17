@@ -289,18 +289,18 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       
       // === 3. CREATE SOITEM (LINE ITEM) ===
       // Each row is a unique line item
-      // Sales Order Product ID/Number is the unique line item ID from Fishbowl
-      const productLineId = row['SO Item Product Number'] || row['Sales Order Product Number'] || row['Sales Order Product ID'] || row['SO item Product Id'];
-      if (!productLineId) {
+      // SO Item ID (Column AD) is the UNIQUE line item ID from Fishbowl
+      const lineItemId = row['SO Item ID'] || row['SO item ID'] || row['SO Item Id'];
+      if (!lineItemId) {
         // Log first few skipped items to debug field name issues
         if (stats.skipped < 5) {
-          console.log(`⚠️  Skipping row ${stats.processed} - missing product line ID. Available fields:`, Object.keys(row).filter(k => k.toLowerCase().includes('product')));
+          console.log(`⚠️  Skipping row ${stats.processed} - missing SO Item ID. Available fields:`, Object.keys(row).filter(k => k.toLowerCase().includes('item') || k.toLowerCase().includes('id')));
         }
         stats.skipped++;
         continue;
       }
       
-      const itemDocId = `soitem_${productLineId}`;
+      const itemDocId = `soitem_${lineItemId}`;
       const itemRef = adminDb.collection('fishbowl_soitems').doc(itemDocId);
       
       // Sanitize customer ID for consistency
@@ -382,10 +382,10 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         commissionYear: commissionYear2, // For filtering: 2025
         
         // Line Item Identification
-        lineItemId: String(productLineId), // Sales Order Product ID (unique line item ID)
+        lineItemId: String(lineItemId), // SO Item ID (unique line item ID from Fishbowl)
         
         // Product Info
-        partNumber: row['Part Number'] || '',  // Name of the SKU in Fishbowl
+        partNumber: row['SO Item Product Number'] || row['Part Number'] || '',  // Product SKU (e.g., "KB-4000")
         partId: row['Part id'] || '',  // ID associated to the part number
         product: row['Product'] || '',
         productC1: row['Product Custom Field 1'] || row['Product Custom 1'] || row['Product c1'] || '',  // Product category 1
