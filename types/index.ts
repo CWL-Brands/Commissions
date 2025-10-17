@@ -28,6 +28,8 @@ export interface CommissionBucket {
 export interface ProductSubGoal {
   id: string;
   sku: string;
+  productNum?: string; // Product number (same as sku, for compatibility)
+  productDescription?: string; // Product description
   targetPercent: number; // 0-1 (e.g., 0.25 for 25%)
   subWeight: number; // 0-1 (e.g., 0.30 for 30%)
   msrp?: number;
