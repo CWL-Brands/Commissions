@@ -1648,36 +1648,68 @@ export default function SettingsPage() {
 
     setFishbowlLoading(true);
     setFishbowlResult(null);
-    const loadingToast = toast.loading('Importing Fishbowl data...');
+    const loadingToast = toast.loading('Uploading file...');
 
     try {
-      const formData = new FormData();
-      formData.append('file', fishbowlFile);
-
-      const response = await fetch('/api/fishbowl/import-unified', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Import failed');
-      }
-
-      setFishbowlResult(data);
-      setFishbowlFile(null);
+      const CHUNK_SIZE = 3 * 1024 * 1024; // 3 MB chunks (well under 4.5 MB limit)
+      const fileSize = fishbowlFile.size;
+      const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+      const fileId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      toast.success(
-        `✅ Imported ${data.stats.itemsCreated} line items, ${data.stats.customersCreated + data.stats.customersUpdated} customers, ${data.stats.ordersCreated + data.stats.ordersUpdated} orders!`,
-        { id: loadingToast, duration: 5000 }
-      );
+      console.log(`📦 Uploading ${fishbowlFile.name} (${(fileSize / 1024 / 1024).toFixed(2)} MB) in ${totalChunks} chunks`);
       
-      // Reload customers if on that tab
-      if (activeTab === 'customers') {
-        loadCustomers();
+      // Upload chunks
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const start = chunkIndex * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, fileSize);
+        const chunk = fishbowlFile.slice(start, end);
+        
+        const formData = new FormData();
+        formData.append('chunk', chunk);
+        formData.append('chunkIndex', chunkIndex.toString());
+        formData.append('totalChunks', totalChunks.toString());
+        formData.append('fileId', fileId);
+        formData.append('filename', fishbowlFile.name);
+        
+        // Update progress
+        const progress = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+        toast.loading(`Uploading... ${progress}%`, { id: loadingToast });
+        
+        const response = await fetch('/api/fishbowl/import-chunked', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Upload failed');
+        }
+        
+        // If this was the last chunk, processing is complete
+        if (data.complete) {
+          console.log('✅ Upload and processing complete!');
+          setFishbowlResult(data);
+          setFishbowlFile(null);
+          
+          toast.success(
+            `✅ Imported ${data.stats.itemsCreated} line items, ${data.stats.customersCreated + data.stats.customersUpdated} customers, ${data.stats.ordersCreated + data.stats.ordersUpdated} orders!`,
+            { id: loadingToast, duration: 5000 }
+          );
+          
+          // Reload customers if on that tab
+          if (activeTab === 'customers') {
+            loadCustomers();
+          }
+          
+          break;
+        } else {
+          console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} uploaded (${data.progress.toFixed(1)}%)`);
+        }
       }
+      
     } catch (error: any) {
+      console.error('Upload error:', error);
       toast.error(error.message || 'Failed to import data', { id: loadingToast });
     } finally {
       setFishbowlLoading(false);
