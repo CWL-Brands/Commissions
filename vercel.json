@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "app/api/fishbowl/import-unified/route.ts": {
+      "maxDuration": 300,
+      "memory": 3008
+    }
+  },
+  "api": {
+    "bodyParser": {
+      "sizeLimit": "50mb"
+    }
+  }
+}
