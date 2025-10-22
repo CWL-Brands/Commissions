@@ -972,22 +972,14 @@ async function getCustomerStatus(
     const customerAgeMonths = Math.floor((currentOrderDate - firstOrderDate) / (1000 * 60 * 60 * 24 * 30));
 
     // Check if customer hasn't ordered in 12+ months (dormant/reactivated)
-    // Use customer age (time since FIRST order) to determine rate, not treat as new
+    // Dead accounts that come back to life get 8% "Own" rate
     if (monthsSinceLastOrder >= 12) {
       console.log(`💤 DORMANT ACCOUNT REACTIVATED: ${customer?.customerName || customerId} - Last order: ${lastOrderDate.toISOString().split('T')[0]} (${monthsSinceLastOrder} months ago)`);
       console.log(`   📅 Customer age: ${customerAgeMonths} months (from first order ${firstOrderDate.toISOString().split('T')[0]})`);
+      console.log(`   → OWN (8%) - Dead account reactivated after 12+ months`);
       
-      // Determine rate based on customer age, not as new business
-      if (customerAgeMonths <= 6) {
-        console.log(`   → NEW BUSINESS (8%) - Still in first 6 months`);
-        return 'new';
-      } else if (customerAgeMonths <= 12) {
-        console.log(`   → 6-MONTH ACTIVE (4%) - Customer is 6-12 months old`);
-        return '6month';
-      } else {
-        console.log(`   → 12-MONTH ACTIVE (4% Wholesale / 2% Distributor) - Customer is 12+ months old`);
-        return '12month';
-      }
+      // Dead accounts reactivated after 12+ months = "Own" status = 8%
+      return 'own';
     }
 
     // REORG RULE: Check if this customer was transferred during the July 2025 reorg
@@ -1110,18 +1102,19 @@ function getCommissionRate(
   // Fallback to hardcoded defaults if no rate found
   console.log(`⚠️ No rate found for ${title} | ${segmentId} | ${mappedStatus}, using defaults`);
   
+  // "Own" customers always get 8% (new business / reactivated dead accounts)
+  if (mappedStatus === 'new_business') return { rate: 8.0, found: false };
+  
   // Transferred customers always get 2% (July 2025 reorg rule)
   if (mappedStatus === 'transferred') return { rate: 2.0, found: false };
   
   if (segmentId === 'distributor') {
-    if (mappedStatus === 'new_business') return { rate: 8.0, found: false };
     if (mappedStatus === '6_month_active') return { rate: 5.0, found: false };
     if (mappedStatus === '12_month_active') return { rate: 3.0, found: false };
   } else if (segmentId === 'wholesale') {
-    if (mappedStatus === 'new_business') return { rate: 10.0, found: false };
     if (mappedStatus === '6_month_active') return { rate: 7.0, found: false };
     if (mappedStatus === '12_month_active') return { rate: 5.0, found: false };
   }
   
-  return { rate: 5.0, found: false }; // Final fallback
+  return { rate: 2.0, found: false }; // Final fallback
 }

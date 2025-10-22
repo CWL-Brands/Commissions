@@ -1413,8 +1413,8 @@ export default function SettingsPage() {
         const data = doc.data();
         const customerId = data.id || data.customerNum || doc.id;
         
-        // Get the assigned rep (from manual assignment or from orders)
-        const assignedRep = data.salesPerson || customerSalesRepMap.get(customerId) || data.salesRep || '';
+        // Get the assigned rep (PRIORITY: manual fishbowlUsername first, then orders)
+        const assignedRep = data.fishbowlUsername || data.salesPerson || customerSalesRepMap.get(customerId) || data.salesRep || '';
         const repName = repsMap.get(assignedRep) || assignedRep || 'Unassigned';
         
         // Get the original owner from Fishbowl orders
@@ -1475,6 +1475,14 @@ export default function SettingsPage() {
     setSavingCustomer(customerId);
     try {
       const customerRef = doc(db, 'fishbowl_customers', customerId);
+      
+      // Get customer data to find Copper ID
+      const customerSnapshot = await getDoc(customerRef);
+      const customerData = customerSnapshot.data();
+      const copperId = customerData?.copperId;
+      const customerName = customerData?.name || customerData?.customerName || 'Unknown';
+      
+      // Update Fishbowl
       await updateDoc(customerRef, {
         accountType: newAccountType
       });
@@ -1487,7 +1495,39 @@ export default function SettingsPage() {
         c.id === customerId ? { ...c, accountType: newAccountType } : c
       ));
       
-      toast.success('Account type updated!');
+      // Sync to Copper if we have a Copper ID
+      if (copperId) {
+        console.log(`🔄 Syncing account type change to Copper for ${customerName}...`);
+        
+        try {
+          const copperResponse = await fetch('/api/copper/update-account-type', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              copperId,
+              accountType: newAccountType,
+              customerName
+            })
+          });
+          
+          const copperResult = await copperResponse.json();
+          
+          if (copperResult.success) {
+            console.log(`✅ Copper updated successfully for ${customerName}`);
+            toast.success('Account type updated in Fishbowl and Copper!');
+          } else if (copperResult.warning) {
+            console.warn(`⚠️ ${copperResult.warning}`);
+            toast.success('Account type updated in Fishbowl (Copper sync skipped)');
+          }
+        } catch (copperError) {
+          console.error('Error syncing to Copper:', copperError);
+          toast.success('Account type updated in Fishbowl (Copper sync failed)');
+        }
+      } else {
+        // No Copper ID, just update Fishbowl
+        toast.success('Account type updated!');
+      }
+      
     } catch (error) {
       console.error('Error updating account type:', error);
       toast.error('Failed to update account type');
@@ -1533,6 +1573,12 @@ export default function SettingsPage() {
       const customerRef = doc(db, 'fishbowl_customers', customerId);
       const repName = reps.find(r => r.salesPerson === newFishbowlUsername)?.name || newFishbowlUsername || 'Unassigned';
       
+      // Get customer data to find Copper ID
+      const customerSnapshot = await getDoc(customerRef);
+      const customerData = customerSnapshot.data();
+      const copperId = customerData?.copperId;
+      const customerName = customerData?.name || customerData?.customerName || 'Unknown';
+      
       // Update both fishbowlUsername (manual assignment) and salesPerson (display name)
       await updateDoc(customerRef, {
         fishbowlUsername: newFishbowlUsername,  // This is the manual override
@@ -1547,7 +1593,39 @@ export default function SettingsPage() {
         c.id === customerId ? { ...c, salesPerson: repName, fishbowlUsername: newFishbowlUsername } : c
       ));
       
-      toast.success('Sales rep updated!');
+      // Sync to Copper if we have a Copper ID
+      if (copperId && newFishbowlUsername && newFishbowlUsername !== '') {
+        console.log(`🔄 Syncing sales rep change to Copper for ${customerName}...`);
+        
+        try {
+          const copperResponse = await fetch('/api/copper/update-owner', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              copperId,
+              newSalesPerson: newFishbowlUsername,
+              customerName
+            })
+          });
+          
+          const copperResult = await copperResponse.json();
+          
+          if (copperResult.success) {
+            console.log(`✅ Copper updated successfully for ${customerName}`);
+            toast.success('Sales rep updated in Fishbowl and Copper!');
+          } else if (copperResult.warning) {
+            console.warn(`⚠️ ${copperResult.warning}`);
+            toast.success('Sales rep updated in Fishbowl (Copper sync skipped)');
+          }
+        } catch (copperError) {
+          console.error('Error syncing to Copper:', copperError);
+          toast.success('Sales rep updated in Fishbowl (Copper sync failed)');
+        }
+      } else {
+        // No Copper ID, just update Fishbowl
+        toast.success('Sales rep updated!');
+      }
+      
     } catch (error) {
       console.error('Error updating sales rep:', error);
       toast.error('Failed to update sales rep');
@@ -1599,41 +1677,135 @@ export default function SettingsPage() {
     const loadingToast = toast.loading(`Updating ${selectedCustomers.size} customers...`);
 
     try {
-      const updates: any = {};
-      
-      if (batchAccountType) {
-        updates.accountType = batchAccountType;
-      }
-      
-      if (batchSalesRep) {
-        const selectedRep = reps.find(r => r.id === batchSalesRep);
-        if (selectedRep) {
-          updates.salesPerson = selectedRep.name;
-          updates.fishbowlUsername = selectedRep.salesPerson;
+      let successCount = 0;
+      let failCount = 0;
+      let copperSyncCount = 0;
+
+      console.log(`🔄 Starting batch update for ${selectedCustomers.size} customers`);
+      console.log(`   Account Type: ${batchAccountType || 'none'}`);
+      console.log(`   Sales Rep: ${batchSalesRep || 'none'}`);
+      console.log(`   Transfer Status: ${batchTransferStatus || 'none'}`);
+
+      // Process each customer individually to trigger Copper sync
+      for (const customerId of Array.from(selectedCustomers)) {
+        console.log(`\n📝 Processing customer: ${customerId}`);
+        try {
+          const customerRef = doc(db, 'fishbowl_customers', customerId);
+          const customerSnapshot = await getDoc(customerRef);
+          const customerData = customerSnapshot.data();
+          const copperId = customerData?.copperId;
+          const customerName = customerData?.name || customerData?.customerName || 'Unknown';
+          
+          const updates: any = {};
+          console.log(`   Customer: ${customerName}, Copper ID: ${copperId || 'none'}`);
+          
+          // Update Account Type
+          if (batchAccountType) {
+            console.log(`   → Setting accountType to: ${batchAccountType}`);
+            updates.accountType = batchAccountType;
+            
+            // Sync to Copper if available
+            if (copperId) {
+              console.log(`   → Syncing account type to Copper...`);
+              try {
+                const copperResponse = await fetch('/api/copper/update-account-type', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ copperId, accountType: batchAccountType, customerName })
+                });
+                const copperResult = await copperResponse.json();
+                if (copperResult.success) {
+                  console.log(`   ✅ Copper account type synced`);
+                  copperSyncCount++;
+                } else {
+                  console.log(`   ⚠️ Copper sync skipped: ${copperResult.warning || copperResult.error}`);
+                }
+              } catch (copperError) {
+                console.error(`   ❌ Copper sync failed:`, copperError);
+              }
+            } else {
+              console.log(`   ⚠️ No Copper ID, skipping sync`);
+            }
+          }
+          
+          // Update Sales Rep
+          if (batchSalesRep) {
+            console.log(`   → Looking for rep with salesPerson: ${batchSalesRep}`);
+            const selectedRep = reps.find(r => r.salesPerson === batchSalesRep);
+            console.log(`   → Found rep:`, selectedRep);
+            if (selectedRep) {
+              updates.salesPerson = selectedRep.name;
+              updates.fishbowlUsername = selectedRep.salesPerson;
+              console.log(`   → Setting salesPerson to: ${selectedRep.name} (${selectedRep.salesPerson})`);
+              
+              // Sync to Copper if available
+              if (copperId && selectedRep.salesPerson) {
+                console.log(`   → Syncing sales rep to Copper...`);
+                try {
+                  const copperResponse = await fetch('/api/copper/update-owner', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ copperId, newSalesPerson: selectedRep.salesPerson, customerName })
+                  });
+                  const copperResult = await copperResponse.json();
+                  if (copperResult.success) {
+                    console.log(`   ✅ Copper owner synced`);
+                    copperSyncCount++;
+                  } else {
+                    console.log(`   ⚠️ Copper sync skipped: ${copperResult.warning || copperResult.error}`);
+                  }
+                } catch (copperError) {
+                  console.error(`   ❌ Copper sync failed:`, copperError);
+                }
+              } else {
+                console.log(`   ⚠️ No Copper ID or salesPerson, skipping sync`);
+              }
+            } else {
+              console.error(`   ❌ Rep not found with ID: ${batchSalesRep}`);
+            }
+          }
+
+          // Update Transfer Status
+          if (batchTransferStatus) {
+            const statusValue = batchTransferStatus === 'auto' ? null : batchTransferStatus;
+            console.log(`   → Setting transferStatus to: ${statusValue}`);
+            updates.transferStatus = statusValue;
+          }
+
+          console.log(`   → Updating Firestore with:`, updates);
+          // Update Firestore
+          await updateDoc(customerRef, updates);
+          
+          // Update local state for this customer
+          setCustomers(prev => prev.map(c => 
+            c.id === customerId ? { ...c, ...updates } : c
+          ));
+          setFilteredCustomers(prev => prev.map(c => 
+            c.id === customerId ? { ...c, ...updates } : c
+          ));
+          
+          console.log(`   ✅ Customer updated successfully`);
+          successCount++;
+        } catch (error) {
+          console.error(`   ❌ Failed to update customer ${customerId}:`, error);
+          failCount++;
         }
       }
+      
+      console.log(`\n📊 Batch update complete:`);
+      console.log(`   Success: ${successCount}`);
+      console.log(`   Failed: ${failCount}`);
+      console.log(`   Copper Synced: ${copperSyncCount}`);
 
-      if (batchTransferStatus) {
-        updates.transferStatus = batchTransferStatus === 'auto' ? null : batchTransferStatus;
+      const message = copperSyncCount > 0 
+        ? `✅ Updated ${successCount} customers (${copperSyncCount} synced to Copper)!` 
+        : `✅ Updated ${successCount} customers!`;
+      
+      if (failCount > 0) {
+        toast.error(`⚠️ ${failCount} customers failed to update`, { id: loadingToast });
+      } else {
+        toast.success(message, { id: loadingToast });
       }
-
-      // Update in Firestore
-      const promises = Array.from(selectedCustomers).map(customerId => {
-        const customerRef = doc(db, 'fishbowl_customers', customerId);
-        return updateDoc(customerRef, updates);
-      });
-
-      await Promise.all(promises);
-
-      // Update local state
-      setCustomers(prev => prev.map(c => 
-        selectedCustomers.has(c.id) ? { ...c, ...updates } : c
-      ));
-      setFilteredCustomers(prev => prev.map(c => 
-        selectedCustomers.has(c.id) ? { ...c, ...updates } : c
-      ));
-
-      toast.success(`✅ Updated ${selectedCustomers.size} customers!`, { id: loadingToast });
       
       // Reset batch state
       setSelectedCustomers(new Set());

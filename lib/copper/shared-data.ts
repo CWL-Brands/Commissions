@@ -60,7 +60,11 @@ export async function getCopperUserId(email: string): Promise<number | null> {
 
   try {
     const doc = await adminDb.collection('settings').doc('copper_users_map').get();
-    const mapping = doc.data() as CopperUserMapping;
+    const data = doc.data();
+    
+    // Check if mapping is under 'byEmail' field (current structure)
+    const mapping = (data?.byEmail as CopperUserMapping) || (data as CopperUserMapping);
+    
     return mapping?.[email] || null;
   } catch (error) {
     console.error('Error fetching Copper user mapping:', error);
