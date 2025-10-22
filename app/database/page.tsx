@@ -462,17 +462,50 @@ export default function DatabasePage() {
                 <p className="text-gray-600 mt-1">Admin dashboard for system monitoring and data management</p>
               </div>
             </div>
-            <button
-              onClick={() => {
-                setLoading(true);
-                Promise.all([loadCollectionStats(), loadImportLogs(), checkAPIStatuses()])
-                  .finally(() => { setLoading(false); toast.success('Data refreshed'); });
-              }}
-              className="btn btn-secondary flex items-center"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh
-            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => {
+                  setLoading(true);
+                  Promise.all([loadCollectionStats(), loadImportLogs(), checkAPIStatuses()])
+                    .finally(() => { setLoading(false); toast.success('Data refreshed'); });
+                }}
+                className="btn btn-secondary flex items-center"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm('This will remove duplicate orders, line items, and customers. Continue?')) return;
+                  
+                  setLoading(true);
+                  toast.loading('Cleaning up duplicates...');
+                  
+                  try {
+                    const response = await fetch('/api/cleanup-all-duplicates', { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                      toast.success(`Cleanup complete! Deleted ${result.results.orders.duplicatesDeleted} duplicate orders`);
+                      console.log('Cleanup results:', result.results);
+                      // Refresh data after cleanup
+                      await Promise.all([loadCollectionStats(), loadImportLogs()]);
+                    } else {
+                      toast.error('Cleanup failed: ' + result.error);
+                    }
+                  } catch (error) {
+                    console.error('Cleanup error:', error);
+                    toast.error('Cleanup failed');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                className="btn btn-warning flex items-center"
+              >
+                <Zap className="w-4 h-4 mr-2" />
+                Clean Duplicates
+              </button>
+            </div>
           </div>
         </div>
 

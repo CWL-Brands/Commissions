@@ -177,6 +177,12 @@ export default function SettingsPage() {
   const [fishbowlFile, setFishbowlFile] = useState<File | null>(null);
   const [fishbowlLoading, setFishbowlLoading] = useState(false);
   const [fishbowlResult, setFishbowlResult] = useState<any>(null);
+  const [importProgress, setImportProgress] = useState<any>(null);
+  const [importId, setImportId] = useState<string | null>(null);
+  
+  // Copper Sync state
+  const [copperSyncLoading, setCopperSyncLoading] = useState(false);
+  const [copperSyncResult, setCopperSyncResult] = useState<any>(null);
 
   const loadQuarters = async () => {
     try {
@@ -306,8 +312,50 @@ export default function SettingsPage() {
       const ratesDoc = await getDoc(doc(db, 'settings', `commission_rates_${titleKey}`));
       if (ratesDoc.exists()) {
         const ratesData = ratesDoc.data();
-        setCommissionRates(ratesData);
-        console.log(`Loaded commission rates for ${selectedTitle} from Firestore`);
+        
+        // Ensure all rate combinations exist for the selected title
+        const allStatuses = ['new_business', '6_month_active', '12_month_active', 'transferred'];
+        const allSegments = ['distributor', 'wholesale'];
+        
+        const existingRates = ratesData.rates || [];
+        const completeRates = [...existingRates];
+        
+        // Add missing rate combinations
+        allSegments.forEach(segmentId => {
+          allStatuses.forEach(status => {
+            const exists = existingRates.find((r: any) => 
+              r.title === selectedTitle && r.segmentId === segmentId && r.status === status
+            );
+            
+            if (!exists) {
+              // Add missing rate with default values
+              let defaultPercentage = '';
+              if (status === 'new_business') {
+                defaultPercentage = segmentId === 'distributor' ? 8.0 : 10.0;
+              } else if (status === '6_month_active') {
+                defaultPercentage = segmentId === 'distributor' ? 5.0 : 7.0;
+              } else if (status === '12_month_active') {
+                defaultPercentage = segmentId === 'distributor' ? 3.0 : 5.0;
+              } else if (status === 'transferred') {
+                defaultPercentage = 2.0;
+              }
+              
+              completeRates.push({
+                title: selectedTitle,
+                segmentId,
+                status,
+                percentage: defaultPercentage,
+                active: true
+              });
+            }
+          });
+        });
+        
+        setCommissionRates({
+          ...ratesData,
+          rates: completeRates
+        });
+        console.log(`Loaded commission rates for ${selectedTitle} from Firestore (${completeRates.length} rates total)`);
       } else {
         console.log(`No commission rates found for ${selectedTitle}, using defaults`);
       }
@@ -1259,6 +1307,8 @@ export default function SettingsPage() {
       return segmentId === 'distributor' ? 5.0 : 7.0;
     } else if (status === '12_month_active') {
       return segmentId === 'distributor' ? 3.0 : 5.0;
+    } else if (status === 'transferred') {
+      return 2.0; // Transferred customers get 2% when reorg rule is active
     }
     return '';
   };
@@ -1648,124 +1698,113 @@ export default function SettingsPage() {
 
     setFishbowlLoading(true);
     setFishbowlResult(null);
+    setImportProgress(null);
+    setImportId(null);
     const loadingToast = toast.loading('Uploading file...');
 
     try {
-      const CHUNK_SIZE = 3 * 1024 * 1024; // 3 MB chunks (well under 4.5 MB limit)
-      const fileSize = fishbowlFile.size;
-      const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
-      const fileId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Use unified import (no chunking needed)
+      console.log(`📦 Uploading ${fishbowlFile.name} (${(fishbowlFile.size / 1024 / 1024).toFixed(2)} MB)`);
       
-      console.log(`📦 Uploading ${fishbowlFile.name} (${(fileSize / 1024 / 1024).toFixed(2)} MB) in ${totalChunks} chunks`);
+      const formData = new FormData();
+      formData.append('file', fishbowlFile);
       
-      // Upload chunks
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const start = chunkIndex * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, fileSize);
-        const chunk = fishbowlFile.slice(start, end);
-        
-        const formData = new FormData();
-        formData.append('chunk', chunk);
-        formData.append('chunkIndex', chunkIndex.toString());
-        formData.append('totalChunks', totalChunks.toString());
-        formData.append('fileId', fileId);
-        formData.append('filename', fishbowlFile.name);
-        
-        // Update progress
-        const progress = Math.round(((chunkIndex + 1) / totalChunks) * 100);
-        toast.loading(`Uploading... ${progress}%`, { id: loadingToast });
-        
-        const response = await fetch('/api/fishbowl/import-chunked', {
-          method: 'POST',
-          body: formData,
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-          throw new Error(data.error || 'Upload failed');
-        }
-        
-        // If this was the last chunk, processing is complete
-        if (data.complete) {
-          console.log('✅ Upload and processing complete!');
-          setFishbowlResult(data);
-          setFishbowlFile(null);
-          
-          toast.success(
-            `✅ Imported ${data.stats.itemsCreated} line items, ${data.stats.customersCreated + data.stats.customersUpdated} customers, ${data.stats.ordersCreated + data.stats.ordersUpdated} orders!`,
-            { id: loadingToast, duration: 5000 }
-          );
-          
-          // Reload customers if on that tab
-          if (activeTab === 'customers') {
-            loadCustomers();
-          }
-          
-          break;
-        } else {
-          console.log(`✅ Chunk ${chunkIndex + 1}/${totalChunks} uploaded (${data.progress.toFixed(1)}%)`);
-        }
+      toast.loading('Uploading and processing...', { id: loadingToast });
+      
+      const response = await fetch('/api/fishbowl/import-unified', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Import failed');
+      }
+      
+      console.log('✅ Import completed!', data.stats);
+      
+      // Set result with stats
+      setFishbowlResult({
+        success: true,
+        complete: true,
+        stats: data.stats
+      });
+      
+      setFishbowlFile(null);
+      setFishbowlLoading(false);
+      
+      toast.success(
+        `✅ Imported ${data.stats.itemsCreated} line items (${data.stats.itemsUpdated} updated), ${data.stats.customersCreated} customers (${data.stats.customersUpdated} updated), ${data.stats.ordersCreated} orders (${data.stats.ordersUpdated} updated)!`,
+        { id: loadingToast, duration: 5000 }
+      );
+      
+      // Reload customers if on that tab
+      if (activeTab === 'customers') {
+        loadCustomers();
       }
       
     } catch (error: any) {
-      console.error('Upload error:', error);
+      console.error('Import error:', error);
       toast.error(error.message || 'Failed to import data', { id: loadingToast });
-    } finally {
       setFishbowlLoading(false);
+    }
+  };
+
+  const handleCopperSync = async () => {
+    setCopperSyncLoading(true);
+    setCopperSyncResult(null);
+    const loadingToast = toast.loading('Syncing Copper → Fishbowl...');
+    
+    try {
+      const response = await fetch('/api/sync-copper-to-fishbowl', {
+        method: 'POST',
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Sync failed');
+      }
+      
+      console.log('✅ Copper sync completed!', data.stats);
+      
+      setCopperSyncResult(data);
+      setCopperSyncLoading(false);
+      
+      toast.success(
+        `✅ Synced ${data.stats.matched} customers! Updated ${data.stats.updated} with Copper accountType.`,
+        { id: loadingToast, duration: 5000 }
+      );
+      
+      // Reload customers if on that tab
+      if (activeTab === 'customers') {
+        loadCustomers();
+      }
+      
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      toast.error(error.message || 'Failed to sync Copper data', { id: loadingToast });
+      setCopperSyncLoading(false);
     }
   };
 
   const handleCalculateMonthlyCommissions = async (month: string, year: number) => {
     setSaving(true);
     setShowProcessingModal(true);
-    setProcessingStatus('Initializing calculation...');
+    setProcessingStatus('Starting calculation...');
     setProcessingProgress(0);
     setShowConfetti(false);
     
     const loadingToast = toast.loading('Calculating monthly commissions...');
-    let progressInterval: NodeJS.Timeout | null = null;
     
     try {
-      // Simulate progress updates
-      setProcessingStatus('Loading commission rates...');
-      setProcessingProgress(10);
-      
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      setProcessingStatus('Loading customer data...');
-      setProcessingProgress(20);
-      
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      setProcessingStatus('Processing sales orders...');
-      setProcessingProgress(30);
-      
-      // Start a progress animation that continues during the API call
-      progressInterval = setInterval(() => {
-        setProcessingProgress(prev => {
-          if (prev < 85) {
-            return prev + 1;
-          }
-          return prev;
-        });
-      }, 200); // Update every 200ms
-      
-      // Update status messages during processing
-      setTimeout(() => setProcessingStatus('Analyzing customer segments...'), 1000);
-      setTimeout(() => setProcessingStatus('Applying commission rates...'), 3000);
-      setTimeout(() => setProcessingStatus('Calculating spiffs and bonuses...'), 5000);
-      setTimeout(() => setProcessingStatus('Processing special rules...'), 7000);
-      setTimeout(() => setProcessingStatus('Finalizing calculations...'), 9000);
-      
+      // Start the calculation
       const response = await fetch('/api/calculate-monthly-commissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ month, year })
       });
-      
-      // Stop the progress interval
-      if (progressInterval) clearInterval(progressInterval);
       
       const data = await response.json();
       
@@ -1773,60 +1812,87 @@ export default function SettingsPage() {
         throw new Error(data.error || 'Calculation failed');
       }
       
-      setProcessingProgress(90);
-      setProcessingStatus('Saving results...');
+      console.log('✅ Calculation started:', data.calcId);
+      toast.loading('Processing commissions...', { id: loadingToast });
       
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Start polling for progress
+      const pollInterval = setInterval(async () => {
+        try {
+          const progressResponse = await fetch(`/api/commission-progress?calcId=${data.calcId}`);
+          const progressData = await progressResponse.json();
+          
+          console.log('Progress update:', progressData);
+          
+          if (progressData.success) {
+            const progress = progressData.progress;
+            const percent = progress.percentage || 0;
+            const current = progress.currentOrder || 0;
+            const total = progress.totalOrders || 0;
+            
+            // Update modal
+            setProcessingProgress(percent);
+            setProcessingStatus(`Processing order ${current} of ${total}...`);
+            
+            // Update toast
+            toast.loading(`Processing: ${current} / ${total} (${percent.toFixed(1)}%)`, { id: loadingToast });
+            
+            // Check if complete
+            if (progress.status === 'complete') {
+              clearInterval(pollInterval);
+              
+              setProcessingProgress(100);
+              setProcessingStatus('Complete! 🎉💰');
+              setShowConfetti(true);
+              
+              // Store summary data
+              setCommissionSummary({
+                month,
+                year,
+                commissionsCalculated: progress.stats.commissionsCalculated,
+                totalCommission: progress.stats.totalCommission,
+                ordersProcessed: total,
+                repBreakdown: {},
+                skippedCounts: {
+                  admin: progress.stats.adminSkipped,
+                  shopify: progress.stats.shopifySkipped,
+                  retail: progress.stats.retailSkipped,
+                  inactiveRep: progress.stats.inactiveRepSkipped
+                },
+                calculatedAt: new Date().toISOString()
+              });
+              
+              toast.success(
+                `✅ Calculated ${progress.stats.commissionsCalculated} commissions! Total: $${progress.stats.totalCommission.toFixed(2)}`,
+                { id: loadingToast, duration: 8000 }
+              );
+              
+              setSaving(false);
+              
+              // Close modal after 3 seconds
+              setTimeout(() => {
+                setShowProcessingModal(false);
+              }, 3000);
+            }
+          }
+        } catch (err) {
+          console.error('Progress polling error:', err);
+        }
+      }, 1000); // Poll every second
       
-      // Store summary data for display
-      setCommissionSummary({
-        month,
-        year,
-        commissionsCalculated: data.commissionsCalculated,
-        totalCommission: data.totalCommission,
-        ordersProcessed: data.processed,
-        repBreakdown: data.repBreakdown || {},
-        skippedCounts: data.skippedCounts || {},
-        calculatedAt: new Date().toISOString()
-      });
-
-      setProcessingProgress(100);
-      setProcessingStatus('Complete! 🎉');
-      setShowConfetti(true);
-      
-      // Show detailed success message
-      if (data.commissionsCalculated > 0) {
-        toast.success(
-          `✅ Calculated ${data.commissionsCalculated} commissions! Total: $${data.totalCommission.toFixed(2)}`,
-          { id: loadingToast, duration: 8000 }
-        );
-      } else {
-        // Show warning if no commissions calculated
-        toast.error(
-          `⚠️ No commissions calculated. Check console for details.`,
-          { id: loadingToast, duration: 10000 }
-        );
-      }
-      
-      // Log detailed summary to console for user
-      console.log('\n🎯 COMMISSION CALCULATION COMPLETE');
-      console.log(`✅ Commissions: ${data.commissionsCalculated}`);
-      console.log(`💰 Total: $${data.totalCommission?.toFixed(2) || '0.00'}`);
-      console.log(`📋 Orders Processed: ${data.processed}`);
+      // Safety timeout after 10 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        if (saving) {
+          toast.error('Calculation timeout - please check console for status', { id: loadingToast });
+          setSaving(false);
+          setShowProcessingModal(false);
+        }
+      }, 10 * 60 * 1000);
       
     } catch (error: any) {
-      // Clean up interval on error
-      if (progressInterval) clearInterval(progressInterval);
       toast.error(error.message || 'Failed to calculate commissions', { id: loadingToast });
       setShowProcessingModal(false);
-    } finally {
       setSaving(false);
-      // Close modal after 3 seconds if successful
-      if (showConfetti) {
-        setTimeout(() => {
-          setShowProcessingModal(false);
-        }, 3000);
-      }
     }
   };
 
@@ -2654,7 +2720,7 @@ export default function SettingsPage() {
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-3xl">🐟</span>
                 <div>
-                  <h2 className="text-2xl font-bold text-purple-900">Fishbowl Data Import</h2>
+                  <h2 className="text-2xl font-bold text-purple-900">Step 1: Fishbowl Data Import</h2>
                   <p className="text-sm text-purple-700">Import Conversight report - Creates Customers, Orders, AND Line Items!</p>
                 </div>
               </div>
@@ -2698,6 +2764,180 @@ export default function SettingsPage() {
                 >
                   {fishbowlLoading ? '⏳ Importing All Data...' : '🚀 Import Fishbowl Data'}
                 </button>
+
+                {/* Progress Modal - Full Screen Overlay */}
+                {fishbowlLoading && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg shadow-2xl p-8 max-w-2xl w-full mx-4">
+                      <div className="mb-6">
+                        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                          📊 Importing Fishbowl Data
+                        </h2>
+                        <p className="text-gray-600">Please wait while we process your data...</p>
+                      </div>
+
+                      {importProgress ? (
+                        <>
+                          {/* Progress Bar */}
+                          <div className="mb-6">
+                            <div className="flex justify-between text-sm text-gray-700 mb-3">
+                              <span className="font-medium text-lg">
+                                {importProgress.currentRow?.toLocaleString() || 0} / {importProgress.totalRows?.toLocaleString() || 0} rows
+                              </span>
+                              <span className="font-bold text-2xl text-blue-600">
+                                {importProgress.percentage?.toFixed(1) || 0}%
+                              </span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-6 overflow-hidden shadow-inner">
+                              <div 
+                                className="bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 h-6 rounded-full transition-all duration-500 ease-out animate-pulse"
+                                style={{ width: `${importProgress.percentage || 0}%` }}
+                              ></div>
+                            </div>
+                          </div>
+
+                          {/* Current Processing Info */}
+                          {importProgress.currentCustomer && (
+                            <div className="mb-6">
+                              <p className="text-sm text-gray-600 mb-2 font-medium">Currently Processing:</p>
+                              <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-4 border-2 border-blue-200">
+                                <div className="flex items-center space-x-3 mb-2">
+                                  <span className="text-2xl">🏢</span>
+                                  <span className="font-bold text-lg text-gray-900">{importProgress.currentCustomer}</span>
+                                </div>
+                                {importProgress.currentOrder && (
+                                  <div className="flex items-center space-x-3">
+                                    <span className="text-2xl">📄</span>
+                                    <span className="text-gray-700 font-medium">Order: {importProgress.currentOrder}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Statistics */}
+                          {importProgress.stats && (
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 text-center">
+                                <p className="text-gray-600 text-sm mb-1">Customers</p>
+                                <p className="text-3xl font-bold text-blue-600">
+                                  {(importProgress.stats.customersCreated + importProgress.stats.customersUpdated).toLocaleString()}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {importProgress.stats.customersUpdated} updated
+                                </p>
+                              </div>
+                              <div className="bg-green-50 rounded-lg p-4 border border-green-200 text-center">
+                                <p className="text-gray-600 text-sm mb-1">Orders</p>
+                                <p className="text-3xl font-bold text-green-600">
+                                  {(importProgress.stats.ordersCreated + importProgress.stats.ordersUpdated).toLocaleString()}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {importProgress.stats.ordersUpdated} updated
+                                </p>
+                              </div>
+                              <div className="bg-purple-50 rounded-lg p-4 border border-purple-200 text-center">
+                                <p className="text-gray-600 text-sm mb-1">Items</p>
+                                <p className="text-3xl font-bold text-purple-600">
+                                  {importProgress.stats.itemsCreated?.toLocaleString() || 0}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {importProgress.stats.skipped || 0} skipped
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-center py-12">
+                          <div className="inline-block animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mb-4"></div>
+                          <p className="text-gray-600 text-lg">Uploading chunks and starting import...</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Old Progress Display - Hidden */}
+                {false && fishbowlLoading && importProgress && (
+                  <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-blue-900 mb-4">
+                      📊 Importing Fishbowl Data...
+                    </h3>
+                    
+                    {/* Progress Bar */}
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-gray-700 mb-2">
+                        <span className="font-medium">
+                          {importProgress.currentRow?.toLocaleString() || 0} / {importProgress.totalRows?.toLocaleString() || 0} rows
+                        </span>
+                        <span className="font-bold text-blue-600">
+                          {importProgress.percentage?.toFixed(1) || 0}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-4 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${importProgress.percentage || 0}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    {/* Current Processing Info */}
+                    {importProgress.currentCustomer && (
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-gray-600">Currently Processing:</span>
+                        </div>
+                        <div className="bg-white rounded p-3 border border-blue-100">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className="text-blue-600 font-medium">🏢</span>
+                            <span className="font-medium text-gray-900">{importProgress.currentCustomer}</span>
+                          </div>
+                          {importProgress.currentOrder && (
+                            <div className="flex items-center space-x-2">
+                              <span className="text-purple-600 font-medium">📄</span>
+                              <span className="text-gray-700">Order: {importProgress.currentOrder}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Statistics */}
+                    {importProgress.stats && (
+                      <div className="mt-4 grid grid-cols-3 gap-3 text-xs">
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <p className="text-gray-600 mb-1">Customers</p>
+                          <p className="text-lg font-bold text-blue-600">
+                            {(importProgress.stats.customersCreated + importProgress.stats.customersUpdated).toLocaleString()}
+                          </p>
+                          <p className="text-gray-500">
+                            {importProgress.stats.customersUpdated} updated
+                          </p>
+                        </div>
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <p className="text-gray-600 mb-1">Orders</p>
+                          <p className="text-lg font-bold text-green-600">
+                            {(importProgress.stats.ordersCreated + importProgress.stats.ordersUpdated).toLocaleString()}
+                          </p>
+                          <p className="text-gray-500">
+                            {importProgress.stats.ordersUpdated} updated
+                          </p>
+                        </div>
+                        <div className="bg-white rounded p-2 border border-blue-100">
+                          <p className="text-gray-600 mb-1">Items</p>
+                          <p className="text-lg font-bold text-purple-600">
+                            {importProgress.stats.itemsCreated?.toLocaleString() || 0}
+                          </p>
+                          <p className="text-gray-500">
+                            {importProgress.stats.skipped || 0} skipped
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {fishbowlResult && (
@@ -2734,6 +2974,95 @@ export default function SettingsPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Step 2: Copper Sync Section */}
+            <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border-2 border-cyan-300 rounded-lg shadow-lg p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-3xl">🔗</span>
+                <div>
+                  <h2 className="text-2xl font-bold text-cyan-900">Step 2: Sync Copper → Fishbowl</h2>
+                  <p className="text-sm text-cyan-700">Match ACTIVE Copper companies and update accountType (Distributor/Wholesale/Retail)</p>
+                </div>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="p-4 bg-cyan-50 border border-cyan-300 rounded-lg">
+                  <p className="text-sm text-cyan-900 font-semibold mb-2">
+                    🎯 <strong>WHAT THIS DOES:</strong>
+                  </p>
+                  <ul className="mt-2 text-sm text-cyan-800 space-y-1">
+                    <li>✅ Loads ACTIVE Copper companies only</li>
+                    <li>✅ Matches by Name + Address + City + State + Zip</li>
+                    <li>✅ Updates Fishbowl customers with correct accountType</li>
+                    <li>✅ Links Copper ID for future reference</li>
+                    <li>✅ Runs in ~5-10 minutes</li>
+                  </ul>
+                </div>
+
+                <button
+                  onClick={handleCopperSync}
+                  disabled={copperSyncLoading}
+                  className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 text-white px-6 py-4 rounded-lg hover:from-cyan-700 hover:to-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-bold text-lg shadow-lg"
+                >
+                  {copperSyncLoading ? '⏳ Syncing Copper Data...' : '🔗 Sync Copper → Fishbowl'}
+                </button>
+
+                {copperSyncResult && (
+                  <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h3 className="text-lg font-semibold text-green-900 mb-3">
+                      ✅ Sync Complete!
+                    </h3>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-600">Copper Companies Loaded</p>
+                        <p className="text-xl font-bold text-cyan-600">
+                          {copperSyncResult.stats.copperLoaded.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-500">Active only</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Fishbowl Customers Loaded</p>
+                        <p className="text-xl font-bold text-blue-600">
+                          {copperSyncResult.stats.fishbowlLoaded.toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Matched & Updated</p>
+                        <p className="text-xl font-bold text-green-600">
+                          {copperSyncResult.stats.updated.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-500">AccountType synced</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Already Correct</p>
+                        <p className="text-xl font-bold text-gray-600">
+                          {copperSyncResult.stats.alreadyCorrect.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-500">No change needed</p>
+                      </div>
+                    </div>
+                    {copperSyncResult.stats.noMatch > 0 && (
+                      <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                        <p className="text-sm text-yellow-800 mb-3">
+                          ⚠️ <strong>{copperSyncResult.stats.noMatch}</strong> Fishbowl customers had no Copper match
+                        </p>
+                        <a
+                          href="/api/export-unmatched-customers"
+                          download
+                          className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm font-medium"
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Download Unmatched Customers CSV
+                        </a>
+                        <p className="text-xs text-yellow-700 mt-2">
+                          Send this to your sales team to add Account Order IDs to Copper
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Calculate Commissions Section */}
@@ -3255,219 +3584,70 @@ export default function SettingsPage() {
                             />
                           </td>
                         </tr>
+                        <tr className="hover:bg-gray-50 bg-orange-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            Transferred (Reorg)
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            Customer transferred during July 2025 reorg (when reorg rule is active)
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center max-w-xs">
+                              <input
+                                type="number"
+                                value={getRateValue(segment.id, 'transferred')}
+                                onChange={(e) => updateRateValue(segment.id, 'transferred', e.target.value)}
+                                step="0.1"
+                                min="0"
+                                max="100"
+                                className="input"
+                                placeholder="2.0"
+                              />
+                              <span className="ml-2 text-gray-600">%</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={commissionRates.rates.find((r: any) => r.title === selectedTitle && r.segmentId === segment.id && r.status === 'transferred')?.active ?? true}
+                              onChange={(e) => updateRateValue(segment.id, 'transferred', getRateValue(segment.id, 'transferred'), e.target.checked)}
+                              className="w-4 h-4"
+                            />
+                          </td>
+                        </tr>
                       </tbody>
                     </table>
                   </div>
                 </div>
               ))}
 
-              {/* Special Rules Section */}
-              <div className="mt-8 border-t border-gray-200 pt-8">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Special Rules</h3>
-                
-                <div className="space-y-6">
-                  {/* Rep Transfer Rule */}
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-semibold text-gray-900">Rep Transfer Commission</h4>
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={commissionRates.specialRules.repTransfer.enabled}
-                          onChange={(e) => setCommissionRates({
-                            ...commissionRates,
-                            specialRules: {
-                              ...commissionRates.specialRules,
-                              repTransfer: {
-                                ...commissionRates.specialRules.repTransfer,
-                                enabled: e.target.checked
-                              }
-                            }
-                          })}
-                          className="mr-2"
-                        />
-                        <span className="text-sm text-gray-700">Enabled</span>
-                      </label>
-                    </div>
-                    <p className="text-sm text-gray-600 mb-4">
-                      When a customer changes sales reps, apply special commission rate for the new rep based on customer segment
-                    </p>
-                    
-                    {/* Segment-Specific Rates */}
-                    <div className="mb-4 p-3 bg-white rounded border border-blue-300">
-                      <h5 className="text-sm font-semibold text-gray-900 mb-3">Segment-Specific Transfer Rates</h5>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Wholesale Transfer Rate
-                          </label>
-                          <div className="flex items-center">
-                            <input
-                              type="number"
-                              value={commissionRates.specialRules.repTransfer.segmentRates?.wholesale || 4.0}
-                              onChange={(e) => setCommissionRates({
-                                ...commissionRates,
-                                specialRules: {
-                                  ...commissionRates.specialRules,
-                                  repTransfer: {
-                                    ...commissionRates.specialRules.repTransfer,
-                                    segmentRates: {
-                                      ...commissionRates.specialRules.repTransfer.segmentRates,
-                                      wholesale: Number(e.target.value)
-                                    }
-                                  }
-                                }
-                              })}
-                              step="0.1"
-                              className="input"
-                              placeholder="4.0"
-                            />
-                            <span className="ml-2 text-gray-600">%</span>
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Distributor Transfer Rate
-                          </label>
-                          <div className="flex items-center">
-                            <input
-                              type="number"
-                              value={commissionRates.specialRules.repTransfer.segmentRates?.distributor || 2.0}
-                              onChange={(e) => setCommissionRates({
-                                ...commissionRates,
-                                specialRules: {
-                                  ...commissionRates.specialRules,
-                                  repTransfer: {
-                                    ...commissionRates.specialRules.repTransfer,
-                                    segmentRates: {
-                                      ...commissionRates.specialRules.repTransfer.segmentRates,
-                                      distributor: Number(e.target.value)
-                                    }
-                                  }
-                                }
-                              })}
-                              step="0.1"
-                              className="input"
-                              placeholder="2.0"
-                            />
-                            <span className="ml-2 text-gray-600">%</span>
-                          </div>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        These rates apply when a customer is transferred to a new rep. The system will use the appropriate rate based on the customer&apos;s segment.
-                      </p>
-                    </div>
-
-                    {/* Fallback Options */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Flat Fee (Optional)
-                        </label>
-                        <div className="flex items-center">
-                          <span className="text-gray-600 mr-1">$</span>
-                          <input
-                            type="number"
-                            value={commissionRates.specialRules.repTransfer.flatFee}
-                            onChange={(e) => setCommissionRates({
-                              ...commissionRates,
-                              specialRules: {
-                                ...commissionRates.specialRules,
-                                repTransfer: {
-                                  ...commissionRates.specialRules.repTransfer,
-                                  flatFee: Number(e.target.value)
-                                }
-                              }
-                            })}
-                            className="input"
-                            placeholder="0"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Default Fallback %
-                        </label>
-                        <div className="flex items-center">
-                          <input
-                            type="number"
-                            value={commissionRates.specialRules.repTransfer.percentFallback}
-                            onChange={(e) => setCommissionRates({
-                              ...commissionRates,
-                              specialRules: {
-                                ...commissionRates.specialRules,
-                                repTransfer: {
-                                  ...commissionRates.specialRules.repTransfer,
-                                  percentFallback: Number(e.target.value)
-                                }
-                              }
-                            })}
-                            step="0.1"
-                            className="input"
-                            placeholder="2.0"
-                          />
-                          <span className="ml-2 text-gray-600">%</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Used if segment not found
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Calculation
-                        </label>
-                        <label className="flex items-center mt-2">
-                          <input
-                            type="checkbox"
-                            checked={commissionRates.specialRules.repTransfer.useGreater}
-                            onChange={(e) => setCommissionRates({
-                              ...commissionRates,
-                              specialRules: {
-                                ...commissionRates.specialRules,
-                                repTransfer: {
-                                  ...commissionRates.specialRules.repTransfer,
-                                  useGreater: e.target.checked
-                                }
-                              }
-                            })}
-                            className="mr-2"
-                          />
-                          <span className="text-sm text-gray-700">Use Greater of Two</span>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Inactivity Threshold */}
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <h4 className="font-semibold text-gray-900 mb-2">Customer Inactivity Threshold</h4>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Customer reverts to &quot;New Business&quot; status after this many months of no orders
-                    </p>
-                    <div className="max-w-xs">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Months of Inactivity
-                      </label>
-                      <div className="flex items-center">
-                        <input
-                          type="number"
-                          value={commissionRates.specialRules.inactivityThreshold}
-                          onChange={(e) => setCommissionRates({
-                            ...commissionRates,
-                            specialRules: {
-                              ...commissionRates.specialRules,
-                              inactivityThreshold: Number(e.target.value)
-                            }
-                          })}
-                          min="1"
-                          max="24"
-                          className="input"
-                          placeholder="12"
-                        />
-                        <span className="ml-2 text-gray-600">months</span>
-                      </div>
-                    </div>
+              {/* Note: Special Rules section removed - using main commission rates table for all transfers */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h4 className="font-semibold text-gray-900 mb-2">Customer Inactivity Threshold</h4>
+                <p className="text-sm text-gray-600 mb-4">
+                  Customer reverts to &quot;New Business&quot; status after this many months of no orders
+                </p>
+                <div className="max-w-xs">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Months of Inactivity
+                  </label>
+                  <div className="flex items-center">
+                    <input
+                      type="number"
+                      value={commissionRates.specialRules.inactivityThreshold}
+                      onChange={(e) => setCommissionRates({
+                        ...commissionRates,
+                        specialRules: {
+                          ...commissionRates.specialRules,
+                          inactivityThreshold: Number(e.target.value)
+                        }
+                      })}
+                      min="1"
+                      max="24"
+                      className="input"
+                      placeholder="12"
+                    />
+                    <span className="ml-2 text-gray-600">months</span>
                   </div>
                 </div>
               </div>

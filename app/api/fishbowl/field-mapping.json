@@ -1,0 +1,42 @@
+{
+  "customerIdFields": ["Account ID", "Company id", "Customer Id", "Customer id"],
+  "salesOrderNumberFields": ["Sales order Number"],
+  "salesOrderIdFields": ["Sales Order ID", "Sales order Id"],
+  "soItemIdFields": ["SO Item ID", "So item id"],
+  "dateFields": {
+    "postingDate": ["Date fulfillment", "Date fulfilled", "Date last fulfillment", "Issued date", "Date created"]
+  },
+  "customerFields": {
+    "name": ["Customer Name", "Customer"],
+    "accountNumber": ["Account Number", "Account ID"],
+    "accountId": ["Account ID"],
+    "accountType": ["Account Type", "Account type"],
+    "companyId": ["Company id"],
+    "companyName": ["Company Name", "Company name"],
+    "billingName": ["Billing Name"],
+    "billingAddress": ["Billing Address"],
+    "billingCity": ["Billing City"],
+    "billingState": ["Billing State"],
+    "billingZip": ["Billing Zip"]
+  },
+  "orderFields": {
+    "salesPerson": ["Sales person"],
+    "salesRep": ["Sales Rep"],
+    "salesRepInitials": ["Sales Rep Initials"],
+    "soStatus": ["SO Status"],
+    "soType": ["SO Type"],
+    "priorityId": ["Priority ID"]
+  },
+  "lineItemFields": {
+    "partNumber": ["SO Item Product Number", "Part Number"],
+    "partId": ["Part id"],
+    "partDescription": ["Part Description"],
+    "product": ["Product"],
+    "productId": ["Product ID"],
+    "description": ["Sales Order Item Description"],
+    "quantity": ["Qty fulfilled", "Shipped Quantity"],
+    "unitPrice": ["Unit price", "UNIT PRICE", "Unit Price"],
+    "totalPrice": ["Total Price"],
+    "totalCost": ["Total cost"]
+  }
+}

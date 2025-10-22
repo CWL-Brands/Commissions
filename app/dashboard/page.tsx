@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase/config';
-import { onAuthStateChanged } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { 
   Calculator, 
   Settings, 
@@ -40,9 +41,8 @@ interface MonthlyStats {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const { user, userProfile, loading: authLoading, canViewAllCommissions } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [stats, setStats] = useState<DashboardStats>({
     totalPayout: 0,
     avgAttainment: 0,
@@ -60,37 +60,42 @@ export default function DashboardPage() {
   const [salesPersonId, setSalesPersonId] = useState<string>('');
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        router.push('/login');
-        return;
-      }
+    if (authLoading) return;
+    
+    if (!user) {
+      router.push('/login');
+      return;
+    }
 
-      setUser(user);
+    const loadData = async () => {
+      // Get user's salesPerson ID from userProfile or users collection
+      let userSalesPerson = userProfile?.salesPerson || '';
       
-      // Check if user is admin
-      const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',') || [];
-      const admin = adminEmails.includes(user.email || '');
-      setIsAdmin(admin);
-      
-      // Get user's salesPerson ID from users collection
-      const userDoc = await getDocs(query(collection(db, 'users'), where('email', '==', user.email)));
-      let userSalesPerson = '';
-      if (!userDoc.empty) {
-        const userData = userDoc.docs[0].data();
-        userSalesPerson = userData.salesPerson || '';
-        setSalesPersonId(userSalesPerson);
+      if (!userSalesPerson && !canViewAllCommissions) {
+        const userDoc = await getDocs(query(collection(db, 'users'), where('email', '==', user.email)));
+        if (!userDoc.empty) {
+          const userData = userDoc.docs[0].data();
+          userSalesPerson = userData.salesPerson || '';
+        }
       }
       
-      // Load dashboard stats
-      await loadDashboardStats(user.uid);
-      await loadMonthlyStats(userSalesPerson);
+      setSalesPersonId(userSalesPerson);
+      
+      // Load dashboard stats - aggregate for VPs, individual for sales reps
+      if (canViewAllCommissions) {
+        await loadTeamDashboardStats();
+        await loadTeamMonthlyStats();
+      } else {
+        await loadDashboardStats(user.uid);
+        await loadMonthlyStats(userSalesPerson);
+      }
       
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
-  }, [router]);
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user, router]);
 
   const loadDashboardStats = async (userId: string) => {
     try {
@@ -185,9 +190,108 @@ export default function DashboardPage() {
     }
   };
 
+  // Load aggregate quarterly bonus stats for all team members (VP/Admin view)
+  const loadTeamDashboardStats = async () => {
+    try {
+      // Load ALL commission entries (no user filter)
+      const entriesRef = collection(db, 'commission_entries');
+      const q = query(entriesRef, orderBy('createdAt', 'desc'));
+      
+      const snapshot = await getDocs(q);
+      
+      let totalPayout = 0;
+      let totalAttainment = 0;
+      let count = 0;
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.payout) totalPayout += data.payout;
+        if (data.attainment) {
+          totalAttainment += data.attainment;
+          count++;
+        }
+      });
+      
+      const avgAttainment = count > 0 ? totalAttainment / count : 0;
+      
+      // Calculate total budget (assume $25k per rep, get unique rep count)
+      const uniqueReps = new Set<string>();
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.repId) uniqueReps.add(data.repId);
+      });
+      const budget = uniqueReps.size * 25000;
+      const utilization = budget > 0 ? totalPayout / budget : 0;
+      
+      setStats({
+        totalPayout,
+        avgAttainment,
+        budget,
+        utilization,
+      });
+    } catch (error) {
+      console.error('Error loading team dashboard stats:', error);
+    }
+  };
+
+  // Load aggregate monthly commission stats for all team members (VP/Admin view)
+  const loadTeamMonthlyStats = async () => {
+    try {
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const currentMonthKey = `${currentYear}-${currentMonth}`;
+      
+      // Load ALL monthly commission summaries (no salesPerson filter)
+      const summariesQuery = query(
+        collection(db, 'monthly_commission_summary'),
+        orderBy('month', 'desc')
+      );
+      
+      const summariesSnapshot = await getDocs(summariesQuery);
+      const summaries: any[] = [];
+      summariesSnapshot.forEach((doc) => {
+        summaries.push({ id: doc.id, ...doc.data() });
+      });
+      
+      // Aggregate current month data across all reps
+      const currentMonthSummaries = summaries.filter(s => s.month === currentMonthKey);
+      const monthlyCommission = currentMonthSummaries.reduce((sum, s) => sum + (s.totalCommission || 0), 0);
+      const monthlySpiffs = currentMonthSummaries.reduce((sum, s) => sum + (s.totalSpiffs || 0), 0);
+      const monthlyOrders = currentMonthSummaries.reduce((sum, s) => sum + (s.totalOrders || 0), 0);
+      
+      // Calculate YTD across all reps
+      const ytdCommission = summaries
+        .filter(s => s.year === currentYear)
+        .reduce((sum, s) => sum + (s.totalCommission || 0), 0);
+      
+      // Get last 3 months aggregated
+      const monthKeys = [...new Set(summaries.map(s => s.month))].slice(0, 3);
+      const last3Months = monthKeys.map(monthKey => {
+        const monthSummaries = summaries.filter(s => s.month === monthKey);
+        return {
+          month: monthKey,
+          commission: monthSummaries.reduce((sum, s) => sum + (s.totalCommission || 0), 0),
+          spiffs: monthSummaries.reduce((sum, s) => sum + (s.totalSpiffs || 0), 0),
+        };
+      });
+      
+      setMonthlyStats({
+        currentMonth: currentMonthKey,
+        monthlyCommission,
+        monthlySpiffs,
+        monthlyOrders,
+        ytdCommission,
+        last3Months,
+      });
+    } catch (error) {
+      console.error('Error loading team monthly stats:', error);
+    }
+  };
+
   const handleSignOut = async () => {
     try {
-      await auth.signOut();
+      await signOut(auth);
       toast.success('Signed out successfully');
       router.push('/');
     } catch (error) {
@@ -219,7 +323,7 @@ export default function DashboardPage() {
             <div className="flex items-center space-x-4">
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{user?.email}</p>
-                <p className="text-xs text-gray-600">{isAdmin ? 'Admin' : 'Sales Rep'}</p>
+                <p className="text-xs text-gray-600">{canViewAllCommissions ? 'Admin/VP' : 'Sales Rep'}</p>
               </div>
               <button
                 onClick={handleSignOut}
@@ -235,9 +339,11 @@ export default function DashboardPage() {
 
       <div className="container mx-auto px-4 py-8">
         {/* Monthly Commission Stats */}
-        {salesPersonId && (
+        {(salesPersonId || canViewAllCommissions) && (
           <>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Monthly Commissions</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">
+              {canViewAllCommissions ? 'Team Monthly Commissions' : 'Monthly Commissions'}
+            </h2>
             <div className="grid md:grid-cols-4 gap-6 mb-8">
               <div className="card bg-gradient-to-br from-green-50 to-green-100">
                 <div className="flex items-center justify-between mb-2">
@@ -247,7 +353,10 @@ export default function DashboardPage() {
                 <p className="text-3xl font-bold text-gray-900">
                   ${monthlyStats.monthlyCommission.toLocaleString()}
                 </p>
-                <p className="text-xs text-gray-600 mt-1">{monthlyStats.currentMonth}</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  {monthlyStats.currentMonth}
+                  {canViewAllCommissions && ' (All Reps)'}
+                </p>
               </div>
 
               <div className="card bg-gradient-to-br from-purple-50 to-purple-100">
@@ -258,7 +367,9 @@ export default function DashboardPage() {
                 <p className="text-3xl font-bold text-gray-900">
                   ${monthlyStats.monthlySpiffs.toLocaleString()}
                 </p>
-                <p className="text-xs text-gray-600 mt-1">This month</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  This month{canViewAllCommissions && ' (Team Total)'}
+                </p>
               </div>
 
               <div className="card bg-gradient-to-br from-blue-50 to-blue-100">
@@ -269,7 +380,9 @@ export default function DashboardPage() {
                 <p className="text-3xl font-bold text-gray-900">
                   {monthlyStats.monthlyOrders}
                 </p>
-                <p className="text-xs text-gray-600 mt-1">This month</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  This month{canViewAllCommissions && ' (All Reps)'}
+                </p>
               </div>
 
               <div className="card bg-gradient-to-br from-orange-50 to-orange-100">
@@ -280,14 +393,18 @@ export default function DashboardPage() {
                 <p className="text-3xl font-bold text-gray-900">
                   ${monthlyStats.ytdCommission.toLocaleString()}
                 </p>
-                <p className="text-xs text-gray-600 mt-1">Year to date</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  Year to date{canViewAllCommissions && ' (Team)'}
+                </p>
               </div>
             </div>
           </>
         )}
 
         {/* Quarterly Bonus Stats */}
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Quarterly Bonus</h2>
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">
+          {canViewAllCommissions ? 'Team Quarterly Bonus' : 'Quarterly Bonus'}
+        </h2>
         <div className="grid md:grid-cols-4 gap-6 mb-8">
           <div className="card">
             <div className="flex items-center justify-between mb-2">
@@ -297,7 +414,9 @@ export default function DashboardPage() {
             <p className="text-3xl font-bold text-gray-900">
               ${stats.totalPayout.toLocaleString()}
             </p>
-            <p className="text-xs text-gray-500 mt-1">Current quarter</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Current quarter{canViewAllCommissions && ' (Team Total)'}
+            </p>
           </div>
 
           <div className="card">
@@ -308,7 +427,9 @@ export default function DashboardPage() {
             <p className="text-3xl font-bold text-gray-900">
               {(stats.avgAttainment * 100).toFixed(1)}%
             </p>
-            <p className="text-xs text-gray-500 mt-1">Across all buckets</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Across all buckets{canViewAllCommissions && ' (Team Avg)'}
+            </p>
           </div>
 
           <div className="card">
@@ -319,7 +440,9 @@ export default function DashboardPage() {
             <p className="text-3xl font-bold text-gray-900">
               ${stats.budget.toLocaleString()}
             </p>
-            <p className="text-xs text-gray-500 mt-1">Max bonus per rep</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {canViewAllCommissions ? 'Total team budget' : 'Max bonus per rep'}
+            </p>
           </div>
 
           <div className="card">
@@ -330,13 +453,15 @@ export default function DashboardPage() {
             <p className="text-3xl font-bold text-gray-900">
               {(stats.utilization * 100).toFixed(1)}%
             </p>
-            <p className="text-xs text-gray-500 mt-1">Of total budget</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Of total budget{canViewAllCommissions && ' (Team)'}
+            </p>
           </div>
         </div>
 
         {/* Navigation Cards */}
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {isAdmin && (
+          {canViewAllCommissions && (
             <button
               onClick={() => router.push('/settings')}
               className="card hover:shadow-lg transition-shadow cursor-pointer text-left"
@@ -377,7 +502,7 @@ export default function DashboardPage() {
             </p>
           </button>
 
-          {isAdmin && (
+          {canViewAllCommissions && (
             <button
               onClick={() => router.push('/monthly-reports')}
               className="card hover:shadow-lg transition-shadow cursor-pointer text-left"
@@ -392,7 +517,7 @@ export default function DashboardPage() {
             </button>
           )}
 
-          {isAdmin && (
+          {canViewAllCommissions && (
             <button
               onClick={() => router.push('/team')}
               className="card hover:shadow-lg transition-shadow cursor-pointer text-left"

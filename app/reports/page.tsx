@@ -2,9 +2,9 @@
 
 import { useEffect, useState, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth, db } from '@/lib/firebase/config';
-import { onAuthStateChanged } from 'firebase/auth';
+import { db } from '@/lib/firebase/config';
 import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
+import { useAuth } from '@/lib/contexts/AuthContext';
 import { 
   FileText, 
   ArrowLeft,
@@ -70,9 +70,8 @@ interface OrderLineItem {
 
 export default function ReportsPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const { user, userProfile, loading: authLoading, canViewAllCommissions } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [activeTab, setActiveTab] = useState<'quarterly' | 'monthly'>('quarterly');
   
   // Quarterly Bonus State
@@ -86,32 +85,30 @@ export default function ReportsPage() {
   const [monthlySummaries, setMonthlySummaries] = useState<MonthlyCommissionSummary[]>([]);
   const [monthlyDetails, setMonthlyDetails] = useState<MonthlyCommissionDetail[]>([]);
   const [orderLineItems, setOrderLineItems] = useState<Map<string, OrderLineItem[]>>(new Map());
-  const [monthlyViewMode, setMonthlyViewMode] = useState<'summary' | 'detailed'>('summary');
+  const [monthlyViewMode, setMonthlyViewMode] = useState<'summary' | 'detailed' | 'calculation_log'>('summary');
   const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set());
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [selectedRep, setSelectedRep] = useState<string>('all');
+  const [calculationLogs, setCalculationLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        router.push('/login');
-        return;
-      }
+    if (authLoading) return;
+    
+    if (!user) {
+      router.push('/login');
+      return;
+    }
 
-      setUser(user);
-      
-      const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',') || [];
-      const admin = adminEmails.includes(user.email || '');
-      setIsAdmin(admin);
-      
-      await loadReportData(user.uid, admin);
-      await loadMonthlyData(user.uid, admin);
+    const loadData = async () => {
+      await loadReportData(user.uid, canViewAllCommissions);
+      await loadMonthlyData(user.uid, canViewAllCommissions);
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, selectedQuarter, selectedMonth]);
+  }, [authLoading, user, router, selectedQuarter, selectedMonth, canViewAllCommissions]);
 
   const loadMonthlyData = async (userId: string, admin: boolean) => {
     try {
@@ -295,6 +292,67 @@ export default function ReportsPage() {
       newExpanded.add(customerName);
     }
     setExpandedCustomers(newExpanded);
+  };
+
+  const loadCalculationLogs = async () => {
+    if (!selectedMonth) return;
+    
+    setLogsLoading(true);
+    try {
+      const response = await fetch(`/api/commission-calculation-logs?month=${selectedMonth}&rep=${selectedRep}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setCalculationLogs(data.logs);
+        console.log(`Loaded ${data.logs.length} calculation logs`);
+      } else {
+        console.error('Failed to load calculation logs:', data.error);
+        toast.error('Failed to load calculation logs');
+      }
+    } catch (error) {
+      console.error('Error loading calculation logs:', error);
+      toast.error('Failed to load calculation logs');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const exportCalculationLogsToCSV = () => {
+    if (calculationLogs.length === 0) {
+      toast.error('No calculation logs to export');
+      return;
+    }
+
+    // Filter logs by selected rep
+    const filteredLogs = calculationLogs.filter(log => selectedRep === 'all' || log.repName === selectedRep);
+    
+    // Prepare CSV data
+    const csvData = filteredLogs.map(log => ({
+      'Order #': log.orderNum,
+      'Customer': log.customerName,
+      'Sales Rep': log.repName,
+      'Rep Title': log.repTitle,
+      'Segment': log.customerSegment,
+      'Status': log.customerStatus,
+      'Account Type': log.accountType,
+      'Revenue': log.orderAmount,
+      'Rate': `${log.commissionRate.toFixed(2)}%`,
+      'Commission': log.commissionAmount,
+      'Rate Source': log.rateSource === 'configured' ? 'Found' : 'Default',
+      'Calculated At': new Date(log.calculatedAt).toLocaleString(),
+      'Order Date': log.orderDate ? new Date(log.orderDate).toLocaleDateString() : '',
+      'Notes': log.notes || ''
+    }));
+
+    // Create and download CSV
+    const ws = XLSX.utils.json_to_sheet(csvData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Calculation Log');
+    
+    const fileName = `commission-calculation-log-${selectedMonth}-${selectedRep === 'all' ? 'all-reps' : selectedRep.replace(/\s+/g, '-')}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    
+    toast.success(`Exported ${filteredLogs.length} calculation logs to ${fileName}`);
   };
 
   const toggleOrder = async (orderNum: string, commissionRate: number) => {
@@ -564,8 +622,8 @@ export default function ReportsPage() {
       const entriesSheet = XLSX.utils.aoa_to_sheet(entriesData);
       XLSX.utils.book_append_sheet(workbook, entriesSheet, 'Entries');
       
-      // Rep performance sheet (admin only)
-      if (isAdmin && repPerformance.length > 0) {
+      // Rep performance sheet (admin/VP only)
+      if (canViewAllCommissions && repPerformance.length > 0) {
         const repData = [
           ['Rank', 'Rep Name', 'Total Payout', 'Avg Attainment', 'Bucket A', 'Bucket B', 'Bucket C', 'Bucket D'],
           ...repPerformance.map(r => [
@@ -770,8 +828,8 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Rep Performance (Admin Only) */}
-        {isAdmin && repPerformance.length > 0 && (
+        {/* Rep Performance (Admin/VP Only) */}
+        {canViewAllCommissions && repPerformance.length > 0 && (
           <div className="card mb-8">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Team Performance</h2>
             <div className="overflow-x-auto">
@@ -966,6 +1024,17 @@ export default function ReportsPage() {
                 <div className="card">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold text-gray-900">Detailed Orders</h2>
+                    <div className="flex items-center space-x-2">
+                      {monthlyViewMode === 'calculation_log' && calculationLogs.length > 0 && (
+                        <button
+                          onClick={exportCalculationLogsToCSV}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center space-x-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Export CSV</span>
+                        </button>
+                      )}
+                      </div>
                     <div className="flex space-x-2">
                       <button
                         onClick={() => setMonthlyViewMode('summary')}
@@ -986,6 +1055,19 @@ export default function ReportsPage() {
                         }`}
                       >
                         Detailed by Customer
+                      </button>
+                      <button
+                        onClick={() => {
+                          setMonthlyViewMode('calculation_log');
+                          loadCalculationLogs();
+                        }}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          monthlyViewMode === 'calculation_log'
+                            ? 'bg-primary-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Calculation Log
                       </button>
                     </div>
                   </div>
@@ -1038,7 +1120,7 @@ export default function ReportsPage() {
                         </tbody>
                       </table>
                     </div>
-                  ) : (
+                  ) : monthlyViewMode === 'detailed' ? (
                     <div className="space-y-4">
                       {monthlyDetails.length === 0 ? (
                         <div className="text-center text-gray-500 py-8">
@@ -1212,6 +1294,85 @@ export default function ReportsPage() {
                             )}
                           </div>
                         ))
+                      )}
+                    </div>
+                  ) : (
+                    /* Calculation Log View */
+                    <div className="overflow-x-auto">
+                      {logsLoading ? (
+                        <div className="text-center py-8">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                          <p className="text-gray-600 mt-2">Loading calculation logs...</p>
+                        </div>
+                      ) : calculationLogs.length === 0 ? (
+                        <div className="text-center text-gray-500 py-8">
+                          No calculation logs found for {selectedMonth}
+                          <br />
+                          <span className="text-sm">Run a commission calculation to generate logs</span>
+                        </div>
+                      ) : (
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>Order #</th>
+                              <th>Customer</th>
+                              <th>Sales Rep</th>
+                              <th>Segment</th>
+                              <th>Status</th>
+                              <th>Account Type</th>
+                              <th className="text-right">Revenue</th>
+                              <th className="text-right">Rate</th>
+                              <th className="text-right">Commission</th>
+                              <th className="text-center">Rate Source</th>
+                              <th>Calculated At</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {calculationLogs
+                              .filter(log => selectedRep === 'all' || log.repName === selectedRep)
+                              .map((log) => (
+                              <tr key={log.id} className="hover:bg-gray-50">
+                                <td className="text-sm font-medium">{log.orderNum}</td>
+                                <td className="text-sm">{log.customerName}</td>
+                                <td className="text-sm text-gray-600">{log.repName}</td>
+                                <td>
+                                  <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                                    {log.customerSegment}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
+                                    {log.customerStatus}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className={`px-2 py-1 text-xs rounded-full ${
+                                    log.accountType === 'Wholesale' ? 'bg-green-100 text-green-800' :
+                                    log.accountType === 'Distributor' ? 'bg-blue-100 text-blue-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {log.accountType}
+                                  </span>
+                                </td>
+                                <td className="text-right">{formatCurrency(log.orderAmount)}</td>
+                                <td className="text-right text-gray-600">{log.commissionRate.toFixed(2)}%</td>
+                                <td className="text-right font-bold text-green-600">{formatCurrency(log.commissionAmount)}</td>
+                                <td className="text-center">
+                                  <span className={`px-2 py-1 text-xs rounded-full ${
+                                    log.rateSource === 'configured' 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                    {log.rateSource === 'configured' ? '✓ Found' : '⚠ Default'}
+                                  </span>
+                                </td>
+                                <td className="text-sm text-gray-600">
+                                  {new Date(log.calculatedAt).toLocaleString()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       )}
                     </div>
                   )}

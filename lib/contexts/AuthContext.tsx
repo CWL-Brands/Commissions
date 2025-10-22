@@ -9,6 +9,9 @@ interface UserProfile {
   email: string;
   name: string;
   role: 'admin' | 'manager' | 'sales';
+  title?: string; // Job title (e.g., "VP Finance", "Account Executive")
+  salesPerson?: string; // Fishbowl sales person ID
+  canViewAllCommissions?: boolean; // Explicit permission to view all team data
 }
 
 interface AuthContextType {
@@ -17,6 +20,7 @@ interface AuthContextType {
   loading: boolean;
   isAdmin: boolean;
   isManager: boolean;
+  canViewAllCommissions: boolean; // Can view all team member commissions
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -25,6 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   isAdmin: false,
   isManager: false,
+  canViewAllCommissions: false,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -86,9 +91,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAdmin = userProfile?.role === 'admin';
   const isManager = userProfile?.role === 'manager' || userProfile?.role === 'admin';
+  
+  // Determine if user can view all commissions
+  // VPs, Admins, or users with explicit permission can view all data
+  const canViewAllCommissions = 
+    isAdmin || 
+    userProfile?.canViewAllCommissions === true ||
+    (userProfile?.title?.toUpperCase().includes('VP') ?? false);
 
   return (
-    <AuthContext.Provider value={{ user, userProfile, loading, isAdmin, isManager }}>
+    <AuthContext.Provider value={{ user, userProfile, loading, isAdmin, isManager, canViewAllCommissions }}>
       {children}
     </AuthContext.Provider>
   );

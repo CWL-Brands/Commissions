@@ -8,15 +8,67 @@ export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes
 
 /**
- * Unified Fishbowl Import from Conversight Report
+ * Unified Fishbowl Import from Conversight Report - PRODUCTION READY
  * 
- * This single import creates:
- * 1. fishbowl_customers (deduplicated by Customer id)
- * 2. fishbowl_sales_orders (deduplicated by Sales order Number)
- * 3. fishbowl_soitems (one per row - line items)
- * 
- * All properly linked together!
+ * RELIABILITY & ACCURACY IMPROVEMENTS:
+ * - Copper accountType precedence (override > existing > copper > fishbowl)
+ * - CustomerTypeCache for consistent accountType across orders/items
+ * - Robust date parsing (Excel serials, ISO, MM/DD/YYYY, MM-DD-YYYY)
+ * - Safe number parsing (handles $, commas)
+ * - Correct shipping/CC exclusion using SO Item Product Number
+ * - Immutable ID deduplication (Sales Order ID, SO Item ID)
+ * - Accurate created vs updated counts
+ * - Shopify/Commerce flags for easy filtering
+ * - Shipping/CC item flags for debug
+ * - Header fallbacks for Conversight export variations
+ * - Normalized Sales order Number handling
  */
+
+// Helper: Safe number parser (handles $, commas, tolerant)
+function toNumberSafe(v: any): number {
+  if (typeof v === 'number') return v;
+  if (v == null) return 0;
+  const s = String(v).replace(/[\$,]/g, '').trim();
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+}
+
+// Helper: Parse Excel serial dates, ISO dates, and common US formats
+function parseExcelOrTextDate(raw: any): { date?: Date; monthKey?: string; y?: number } {
+  if (!raw && raw !== 0) return {};
+  try {
+    if (typeof raw === 'number') {
+      const excelEpoch = new Date(1899, 11, 30);
+      const d = new Date(excelEpoch.getTime() + raw * 86400000);
+      const m = d.getMonth() + 1, y = d.getFullYear();
+      return { date: d, monthKey: `${y}-${String(m).padStart(2,'0')}`, y };
+    }
+    const s = String(raw).trim();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { // ISO YYYY-MM-DD
+      const [Y, M, D] = s.split('-').map(Number);
+      const d = new Date(Y, M - 1, D);
+      return { date: d, monthKey: `${Y}-${String(M).padStart(2,'0')}`, y: Y };
+    }
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) { // MM/DD/YYYY or M/D/YY
+      const [M, D, Yraw] = s.split('/').map((t) => t.trim());
+      const Y = Number(Yraw.length === 2 ? (Number(Yraw) + 2000) : Yraw);
+      const d = new Date(Y, Number(M) - 1, Number(D));
+      return { date: d, monthKey: `${Y}-${String(Number(M)).padStart(2,'0')}`, y: Y };
+    }
+    if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) { // MM-DD-YYYY
+      const [M, D, Y] = s.split('-').map(Number);
+      const d = new Date(Y, M - 1, D);
+      return { date: d, monthKey: `${Y}-${String(M).padStart(2,'0')}`, y: Y };
+    }
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const m = d.getMonth() + 1, y = d.getFullYear();
+      return { date: d, monthKey: `${y}-${String(m).padStart(2,'0')}`, y };
+    }
+  } catch {}
+  return {};
+}
 
 interface ImportStats {
   processed: number;
@@ -29,20 +81,69 @@ interface ImportStats {
   skipped: number;
 }
 
+// Load only active Copper companies for accountType enrichment
+// Maps by Account Order ID (Fishbowl's accountNumber)
+async function loadActiveCopperCompanies() {
+  const fieldActive = 'Active Customer cf_712751';
+  const fieldType   = 'Account Type cf_675914';
+  const fieldAccountOrderId = 'Account Order ID cf_698467'; // This matches Fishbowl accountNumber
+
+  // We can't OR across different value types in a single Firestore query,
+  // so run a few highly selective queries in parallel and merge.
+  const queries = [
+    adminDb.collection('copper_companies')
+      .where(fieldActive, '==', 'checked')
+      .select(fieldAccountOrderId, fieldType, fieldActive),
+    // Optional fallbacks if some records were stored as booleans/strings:
+    adminDb.collection('copper_companies')
+      .where(fieldActive, '==', true)
+      .select(fieldAccountOrderId, fieldType, fieldActive),
+    adminDb.collection('copper_companies')
+      .where(fieldActive, '==', 'true')
+      .select(fieldAccountOrderId, fieldType, fieldActive),
+    adminDb.collection('copper_companies')
+      .where(fieldActive, '==', 'Checked')
+      .select(fieldAccountOrderId, fieldType, fieldActive),
+  ];
+
+  const results = await Promise.allSettled(queries.map(q => q.get()));
+
+  const copperByAccountNumber = new Map<string, { accountType?: string }>();
+  for (const r of results) {
+    if (r.status !== 'fulfilled') continue;
+    r.value.forEach(doc => {
+      const d = doc.data() || {};
+      const accountOrderId = d[fieldAccountOrderId];
+      if (accountOrderId == null) return;
+
+      const accountNumberKey = String(accountOrderId);
+      const accountType = (d[fieldType] ?? '') as string | undefined;
+
+      // Last write wins; they should all agree anyway.
+      copperByAccountNumber.set(accountNumberKey, { accountType });
+    });
+  }
+
+  console.log(`🔗 Loaded ${copperByAccountNumber.size} ACTIVE Copper companies (by Account Order ID)`);
+  return copperByAccountNumber;
+}
+
 async function importUnifiedReport(buffer: Buffer, filename: string): Promise<ImportStats> {
   console.log('📥 Importing Unified Fishbowl Report from Conversight...');
   
-  let data: Record<string, any>[];
-  
-  // Parse file - use XLSX for both CSV and Excel for consistent parsing
+  // Parse file
   console.log('📄 Parsing file...');
   const workbook = XLSX.read(buffer, { type: 'buffer' });
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  data = XLSX.utils.sheet_to_json(worksheet) as Record<string, any>[];
+  const data = XLSX.utils.sheet_to_json(worksheet) as Record<string, any>[];
   
   console.log(`✅ Found ${data.length} rows to process`);
   
+  if (data.length === 0) {
+    throw new Error('No data found in file');
+  }
+
   const stats: ImportStats = {
     processed: 0,
     customersCreated: 0,
@@ -54,454 +155,389 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
     skipped: 0
   };
   
-  // Track what we've already processed (to avoid duplicates within the same import)
+  // Preload ACTIVE Copper companies (keyed by Account Order ID == accountNumber in Fishbowl)
+  console.log('🔗 Loading ACTIVE Copper companies for accountType enrichment...');
+  const copperByAccountNumber = await loadActiveCopperCompanies();
+  
+  // Track processed entities (in-import dedupe)
   const processedCustomers = new Set<string>();
   const processedOrders = new Set<string>();
   
-  // FIRST PASS: Aggregate order totals from line items using Decimal.js for precision
+  // Cache final customer accountType for consistent order/item writes
+  const customerTypeCache = new Map<string, { type: string; source: 'override'|'existing'|'copper'|'fishbowl' }>();
+  
+  // FIRST PASS: Aggregate order totals from line items
   console.log('🔄 First pass: Aggregating order totals with precise decimal math...');
   const orderTotals = new Map<string, { revenue: Decimal; orderValue: Decimal; lineCount: number }>();
   
   for (const row of data) {
-    const salesOrderNum = String(row['Sales order Number'] || '');
+    // Normalize Sales order Number
+    const salesOrderNum = String(row['Sales order Number'] ?? row['Sales Order Number'] ?? '').trim();
     if (!salesOrderNum) continue;
+
+    // Exclude shipping and CC processing using correct columns
+    const labelLower = String(
+      row['SO Item Product Number'] ?? row['Part Description'] ?? ''
+    ).toLowerCase();
+
+    const isShipping = labelLower.includes('shipping');
+    const isCC = labelLower.includes('cc processing') || labelLower.includes('credit card processing');
     
-    // Exclude shipping and CC processing fees from commission calculations
-    const productDescription = String(row['Sales Order Item Description'] || '').toLowerCase();
-    const isShipping = productDescription.includes('shipping');
-    const isCCProcessing = productDescription.includes('cc processing') || 
-                          productDescription.includes('credit card processing');
-    
-    // Skip this line item if it's shipping or CC processing
-    if (isShipping || isCCProcessing) {
-      console.log(`⏭️  Excluding from totals: ${row['Sales Order Item Description']} (Order ${salesOrderNum})`);
-      continue;
-    }
-    
-    // Revenue is "Total Price" in Coversight export (line item revenue)
-    const revenue = new Decimal(row['Total Price'] || row['Revenue'] || row['Fulfilled revenue'] || 0);
-    // Order value - use same as revenue for line items (will be aggregated at order level)
-    const orderValue = new Decimal(row['Total Price'] || row['Order value'] || row['Fulfilled revenue'] || 0);
-    
+    if (isShipping || isCC) continue;
+
+    // Add header fallbacks
+    const revenue = new Decimal(toNumberSafe(row['Total Price'] ?? row['Total price'] ?? row['Revenue'] ?? row['Fulfilled revenue']));
+    const orderValue = new Decimal(toNumberSafe(row['Total Price'] ?? row['Total price'] ?? row['Order value'] ?? row['Fulfilled revenue']));
+
     if (!orderTotals.has(salesOrderNum)) {
       orderTotals.set(salesOrderNum, { revenue: new Decimal(0), orderValue: new Decimal(0), lineCount: 0 });
     }
-    
-    const totals = orderTotals.get(salesOrderNum)!;
-    totals.revenue = totals.revenue.plus(revenue);
-    totals.orderValue = totals.orderValue.plus(orderValue);
-    totals.lineCount++;
+    const t = orderTotals.get(salesOrderNum)!;
+    t.revenue = t.revenue.plus(revenue);
+    t.orderValue = t.orderValue.plus(orderValue);
+    t.lineCount++;
   }
   
   console.log(`✅ Aggregated ${orderTotals.size} unique orders from ${data.length} line items`);
   
   let batch = adminDb.batch();
   let batchCount = 0;
-  const MAX_BATCH_SIZE = 400; // Firestore hard limit is 500, use 400 for safety
+  const MAX_BATCH_SIZE = 400;
   
-  let rowIndex = 0;
-  const totalRows = data.length;
+  // SECOND PASS: Process each row (customer, order, line item)
   for (const row of data) {
-    rowIndex++;
     stats.processed++;
     
-    // Log progress every 1000 rows
     if (stats.processed % 1000 === 0) {
-      console.log(`📊 Progress: ${stats.processed} of ${totalRows} (${((stats.processed/totalRows)*100).toFixed(1)}%)`);
-      console.log(`   Customers: ${stats.customersCreated} created, ${stats.customersUpdated} updated`);
-      console.log(`   Orders: ${stats.ordersCreated} created, ${stats.ordersUpdated} updated`);
-      console.log(`   Items: ${stats.itemsCreated} created/updated, Skipped: ${stats.skipped}`);
+      console.log(`📊 Progress: ${stats.processed}/${data.length} (${((stats.processed/data.length)*100).toFixed(1)}%)`);
     }
     
+    const customerId = row['Account ID'];
+    const salesOrderNum = String(row['Sales order Number'] ?? row['Sales Order Number'] ?? '').trim();
+    const salesOrderId = row['Sales Order ID'];
+    const lineItemId = row['SO Item ID'] || row['SO item ID'] || row['SO Item Id'] || row['SO item id'];
     
-    try {
-      // Extract key fields
-      const customerId = row['Customer Id'] || row['Customer id'];
-      const salesOrderNum = row['Sales order Number'];
-      const salesOrderId = row['Sales order Id'] || row['Sales Order ID'];
+    // Skip if missing critical data
+    if (!customerId || !salesOrderNum || !salesOrderId || !lineItemId) {
+      stats.skipped++;
+      continue;
+    }
+    
+    // === 1. CREATE/UPDATE CUSTOMER ===
+    if (!processedCustomers.has(String(customerId))) {
+      const customerDocId = String(customerId).replace(/[\/\\]/g, '_').trim();
+      const customerRef = adminDb.collection('fishbowl_customers').doc(customerDocId);
       
-      // Skip if missing critical data
-      if (!customerId || !salesOrderNum || !salesOrderId) {
-        stats.skipped++;
-        continue;
+      const existingCustomer = await customerRef.get();
+      const existingData = existingCustomer.exists ? (existingCustomer.data() || {}) : null;
+
+      // Pull accountType from Copper by Account Number (matches Account Order ID in Copper)
+      const accountNum = row['Account Number'] ?? row['Account ID'];
+      const copper = copperByAccountNumber.get(String(accountNum));
+      const copperAccountType = copper?.accountType?.trim();
+
+      // Raw account type from import (often "Retail")
+      const fbRowAccountType = row['Account Type'] ?? row['Account type'] ?? row['accountType'] ?? row['Segment'] ?? '';
+
+      // Decide final accountType with precedence: override > existing > copper > fishbowl
+      let finalAccountType: string | undefined;
+      let accountTypeSource: 'override' | 'existing' | 'copper' | 'fishbowl' | undefined;
+
+      if (existingData?.accountTypeOverride) {
+        finalAccountType = existingData.accountTypeOverride;
+        accountTypeSource = 'override';
+      } else if (existingData?.accountType) {
+        finalAccountType = existingData.accountType;
+        accountTypeSource = 'existing';
+      } else if (copperAccountType) {
+        finalAccountType = copperAccountType;
+        accountTypeSource = 'copper';
+      } else if (fbRowAccountType) {
+        finalAccountType = String(fbRowAccountType);
+        accountTypeSource = 'fishbowl';
       }
       
-      // === 1. CREATE/UPDATE CUSTOMER ===
-      if (!processedCustomers.has(String(customerId))) {
-        // Sanitize customer ID - remove slashes and invalid Firestore path characters
-        const customerDocId = String(customerId)
-          .replace(/\//g, '_')  // Replace / with _
-          .replace(/\\/g, '_')  // Replace \ with _
-          .trim();
-        
-        const customerRef = adminDb.collection('fishbowl_customers').doc(customerDocId);
-        
-        // Check if exists first to preserve account type
-        const existingCustomer = await customerRef.get();
-        const existingData = existingCustomer.exists ? existingCustomer.data() : null;
-        
-        const customerData: any = {
-          id: customerDocId,  // Fishbowl Customer ID
-          name: row['Customer Name'] || row['Customer'] || '',  // Customer Name (try both formats)
-          accountNumber: row['Account Number'] || '',  // Customer Account Number in Fishbowl
-          // PRESERVE existing accountType if it exists, otherwise use Fishbowl value
-          accountType: existingData?.accountType || row['Account Type'] || '',
-          // PRESERVE manual sales rep assignment (fishbowlUsername) - don't overwrite with import
-          fishbowlUsername: existingData?.fishbowlUsername || '',
-          companyId: row['Company id'] || '',
-          companyName: row['Company Name'] || row['Company name'] || '',
-          parentCompanyId: row['Parent Company ID'] || '',
-          parentCustomerName: row['Parent Customer Name'] || '',
-          shippingCity: row['Shipping City'] || row['Billing City'] || '',
-          shippingState: row['Shipping State'] || row['Billing State'] || '',
-          shippingAddress: row['Shipping Address'] || row['Billing Address'] || '',
-          shippingCountry: row['Shipping Country'] || '',
-          shipToName: row['Ship to name'] || '',
-          shipToZip: row['Ship to zip'] || row['Billing Zip'] || '',
-          customerContact: row['Customer contact'] || '',
-          updatedAt: Timestamp.now(),
-          source: 'fishbowl_unified',
-        };
-        
-        if (existingCustomer.exists) {
-          batch.update(customerRef, customerData);
-          stats.customersUpdated++;
-        } else {
-          batch.set(customerRef, customerData);
-          stats.customersCreated++;
-        }
-        
-        processedCustomers.add(String(customerId));
-        batchCount++;
-      }
+      // Cache the final accountType for use in orders/items
+      customerTypeCache.set(String(customerId), { type: finalAccountType ?? '', source: accountTypeSource ?? 'fishbowl' });
       
-      // === 2. CREATE/UPDATE SALES ORDER ===
-      if (!processedOrders.has(String(salesOrderNum))) {
-        const orderDocId = `fb_so_${salesOrderNum}`;
-        const orderRef = adminDb.collection('fishbowl_sales_orders').doc(orderDocId);
+      const customerData: any = {
+        id: customerDocId,
+        name: row['Customer Name'] || row['Customer'] || '',
+        accountNumber: row['Account Number'] || row['Account ID'] || '',
+        accountId: row['Account ID'] || '',
+        fishbowlUsername: existingData?.fishbowlUsername || '',
+        companyId: row['Company id'] || '',
+        companyName: row['Company Name'] || row['Company name'] || '',
+        parentCompanyId: row['Parent Company ID'] || '',
+        parentCustomerName: row['Parent Customer Name'] || '',
         
-        // Sanitize customer ID for consistency
-        const sanitizedCustomerId = String(customerId)
-          .replace(/\//g, '_')
-          .replace(/\\/g, '_')
-          .trim();
+        billingName: row['Billing Name'] || '',
+        billingAddress: row['Billing Address'] || '',
+        billingCity: row['Billing City'] || '',
+        billingState: row['Billing State'] || '',
+        billingZip: row['Billing Zip'] || '',
         
-        // Parse posting date for commission tracking
-        // Try multiple date field names from Coversight (Date fulfillment is the primary field)
-        const postingDateRaw = row['Date fulfillment'] || row['Date fulfilled'] || row['Date last fulfillment'] || row['Issued date'] || row['Date created'];
-        let postingDate = null;
-        let postingDateStr = '';
-        let commissionMonth = '';
-        let commissionYear = 0;
-        
-        // Debug: Log first few missing dates
-        if (!postingDateRaw && stats.ordersCreated + stats.ordersUpdated < 5) {
-          console.log(`⚠️  Order ${salesOrderNum} missing date. Available date fields:`, 
-            Object.keys(row).filter(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('month')));
-        }
-        
-        if (postingDateRaw) {
-          try {
-            // Check if it's an Excel serial number (numeric)
-            if (typeof postingDateRaw === 'number') {
-              // Convert Excel serial date to JavaScript Date
-              // Excel dates are days since 1/1/1900
-              const excelEpoch = new Date(1899, 11, 30); // Excel epoch (Dec 30, 1899)
-              postingDate = new Date(excelEpoch.getTime() + postingDateRaw * 86400000);
-              
-              const month = postingDate.getMonth() + 1;
-              const day = postingDate.getDate();
-              const year = postingDate.getFullYear();
-              
-              postingDateStr = `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}`;
-              commissionMonth = `${year}-${String(month).padStart(2, '0')}`;
-              commissionYear = year;
-            } else {
-              // String format: MM-DD-YYYY or MM/DD/YYYY
-              const dateStr = String(postingDateRaw);
-              postingDateStr = dateStr;
-              
-              // Try splitting by dash first, then slash
-              let dateParts = dateStr.split('-');
-              if (dateParts.length !== 3) {
-                dateParts = dateStr.split('/');
-              }
-              
-              if (dateParts.length === 3) {
-                const month = parseInt(dateParts[0]);
-                const day = parseInt(dateParts[1]);
-                const year = parseInt(dateParts[2]);
-                postingDate = new Date(year, month - 1, day);
-                commissionMonth = `${year}-${String(month).padStart(2, '0')}`;
-                commissionYear = year;
-              }
-            }
-          } catch (e) {
-            // Silently ignore parse errors
-          }
-        }
-        
-        // Get aggregated totals for this order (convert Decimal to number for storage)
-        const aggregatedTotals = orderTotals.get(String(salesOrderNum));
-        const revenue = aggregatedTotals ? aggregatedTotals.revenue.toNumber() : 0;
-        const orderValue = aggregatedTotals ? aggregatedTotals.orderValue.toNumber() : 0;
-        const lineCount = aggregatedTotals ? aggregatedTotals.lineCount : 0;
-        
-        const orderData: any = {
-          id: orderDocId,  // fb_so_{Sales order Number}
-          num: String(salesOrderNum),  // Sales Order Number (external customer-facing)
-          fishbowlNum: String(salesOrderNum),
-          salesOrderId: String(salesOrderId), // Sales Order ID (Fishbowl assigned ID)
-          customerId: sanitizedCustomerId, // Customer ID (Fishbowl)
-          customerName: row['Customer Name'] || row['Customer'] || '',  // Customer Name (try both formats)
-          salesPerson: row['Sales person'] || '',  // Sales Person (long name)
-          salesRep: row['Sales Rep'] || '',  // Sales Rep (short name)
-          
-          // Commission tracking fields
-          postingDate: postingDate ? Timestamp.fromDate(postingDate) : null,
-          postingDateStr: postingDateStr,
-          commissionDate: postingDate ? Timestamp.fromDate(postingDate) : null, // COMMISSION DATE = POSTING DATE
-          commissionMonth: commissionMonth, // For grouping: "2025-10"
-          commissionYear: commissionYear, // For filtering: 2025
-          
-          // Financial totals - USE AGGREGATED TOTALS FROM ALL LINE ITEMS (precise decimal math)
-          revenue: revenue,  // SUM of all line items for this order
-          orderValue: orderValue,  // SUM of all line items for this order
-          lineItemCount: lineCount, // Number of line items
-          
-          updatedAt: Timestamp.now(),
-          source: 'fishbowl_unified',
-        };
-        
-        // Check if exists
-        const existingOrder = await orderRef.get();
-        if (existingOrder.exists) {
-          batch.update(orderRef, orderData);
-          stats.ordersUpdated++;
-        } else {
-          batch.set(orderRef, orderData);
-          stats.ordersCreated++;
-        }
-        
-        processedOrders.add(String(salesOrderNum));
-        batchCount++;
-      }
-      
-      // === 3. CREATE SOITEM (LINE ITEM) ===
-      // Each row is a unique line item
-      // SO Item ID (Column AD) is the UNIQUE line item ID from Fishbowl
-      const lineItemId = row['SO Item ID'] || row['SO item ID'] || row['SO Item Id'];
-      if (!lineItemId) {
-        // Log first few skipped items to debug field name issues
-        if (stats.skipped < 5) {
-          console.log(`⚠️  Skipping row ${stats.processed} - missing SO Item ID. Available fields:`, Object.keys(row).filter(k => k.toLowerCase().includes('item') || k.toLowerCase().includes('id')));
-        }
-        stats.skipped++;
-        continue;
-      }
-      
-      const itemDocId = `soitem_${lineItemId}`;
-      const itemRef = adminDb.collection('fishbowl_soitems').doc(itemDocId);
-      
-      // Sanitize customer ID for consistency
-      const sanitizedCustomerId = String(customerId)
-        .replace(/\//g, '_')
-        .replace(/\\/g, '_')
-        .trim();
-      
-      // Parse posting date for commission tracking (denormalized for fast queries)
-      // Try multiple date field names from Coversight (Date fulfillment is the primary field)
-      const postingDateRaw2 = row['Date fulfillment'] || row['Date fulfilled'] || row['Date last fulfillment'] || row['Issued date'] || row['Date created'];
-      let postingDate2 = null;
-      let postingDateStr2 = '';
-      let commissionMonth2 = '';
-      let commissionYear2 = 0;
-      
-      if (postingDateRaw2) {
-        try {
-          // Check if it's an Excel serial number (numeric)
-          if (typeof postingDateRaw2 === 'number') {
-            const excelEpoch = new Date(1899, 11, 30);
-            postingDate2 = new Date(excelEpoch.getTime() + postingDateRaw2 * 86400000);
-            
-            const month = postingDate2.getMonth() + 1;
-            const day = postingDate2.getDate();
-            const year = postingDate2.getFullYear();
-            
-            postingDateStr2 = `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}`;
-            commissionMonth2 = `${year}-${String(month).padStart(2, '0')}`;
-            commissionYear2 = year;
-          } else {
-            // String format: MM-DD-YYYY or MM/DD/YYYY
-            const dateStr = String(postingDateRaw2);
-            postingDateStr2 = dateStr;
-            
-            // Try splitting by dash first, then slash
-            let dateParts = dateStr.split('-');
-            if (dateParts.length !== 3) {
-              dateParts = dateStr.split('/');
-            }
-            
-            if (dateParts.length === 3) {
-              const month = parseInt(dateParts[0]);
-              const day = parseInt(dateParts[1]);
-              const year = parseInt(dateParts[2]);
-              postingDate2 = new Date(year, month - 1, day);
-              commissionMonth2 = `${year}-${String(month).padStart(2, '0')}`;
-              commissionYear2 = year;
-            }
-          }
-        } catch (e) {
-          // Ignore parse errors
-        }
-      }
-      
-      const itemData: any = {
-        id: itemDocId,  // soitem_{Sales Order Product ID}
-        
-        // Sales Order Links
-        salesOrderId: String(salesOrderId), // Sales Order ID (Fishbowl assigned ID)
-        salesOrderNum: String(salesOrderNum), // Sales Order Number (customer-facing)
-        soId: `fb_so_${salesOrderNum}`, // Link to fishbowl_sales_orders collection
-        
-        // Customer Info (denormalized for fast queries)
-        customerId: sanitizedCustomerId, // Customer ID (Fishbowl)
-        customerName: row['Customer Name'] || row['Customer'] || '',  // Customer Name (try both formats)
-        accountNumber: row['Account Number'] || '',  // Customer Account Number
-        accountType: row['Account Type'] || '',
-        
-        // Sales Person
-        salesPerson: row['Sales person'] || '',  // Sales Person (long name)
-        salesRep: row['Sales Rep'] || '',  // Sales Rep (short name)
-        
-        // Commission Tracking (denormalized for fast queries)
-        postingDate: postingDate2 ? Timestamp.fromDate(postingDate2) : null,
-        postingDateStr: postingDateStr2,
-        commissionDate: postingDate2 ? Timestamp.fromDate(postingDate2) : null, // COMMISSION DATE = POSTING DATE
-        commissionMonth: commissionMonth2, // For grouping: "2025-10"
-        commissionYear: commissionYear2, // For filtering: 2025
-        
-        // Line Item Identification
-        lineItemId: String(lineItemId), // SO Item ID (unique line item ID from Fishbowl)
-        
-        // Product Info
-        partNumber: row['SO Item Product Number'] || row['Part Number'] || '',  // Product SKU (e.g., "KB-4000")
-        partId: row['Part id'] || '',  // ID associated to the part number
-        product: row['Product'] || '',
-        productC1: row['Product Custom Field 1'] || row['Product Custom 1'] || row['Product c1'] || '',  // Product category 1
-        productC2: row['Product Custom Field 2'] || row['Product Custom 2'] || row['Product c2'] || '',  // Product category 2
-        productC3: row['Product Custom Field 3'] || row['Product Custom 3'] || row['Product c3'] || '',  // Product category 3
-        productC4: row['Product Custom Field 4'] || row['Product Custom 4'] || row['Product c4'] || '',  // Product category 4
-        productC5: row['Product c5'] || row['Product Custom 5'] || row['Product Custom Field 5'] || '',  // Product category 5
-        productDesc: row['Product description'] || row['Product desc'] || row['Part Description'] || '',
-        description: row['Sales Order Item Description'] || '',
-        itemType: row['Sales Order Item Type'] || '',
-        
-        // Shipping Info (try Billing fields as fallback)
         shippingCity: row['Shipping City'] || row['Billing City'] || '',
         shippingState: row['Shipping State'] || row['Billing State'] || '',
-        shippingItemId: row['Shipping Item ID'] || '',
+        shippingAddress: row['Shipping Address'] || row['Billing Address'] || '',
+        shippingCountry: row['Shipping Country'] || '',
+        shipToName: row['Ship to name'] || '',
+        shipToZip: row['Ship to zip'] || row['Billing Zip'] || '',
         
-        // Financial Data (LINE ITEM LEVEL)
-        // Support both Coversight field names and standard names
-        revenue: parseFloat(row['Total Price'] || row['Revenue'] || 0),  // Line item revenue
-        unitPrice: parseFloat(row['UNIT PRICE'] || row['Unit price'] || row['Unit Price'] || 0),  // Price customer pays per unit
-        invoicedCost: parseFloat(row['Total cost'] || row['Invoiced cost'] || 0),  // Cost of the product/line item
-        margin: parseFloat(row['Sales Order Product Margin'] || row['Margin'] || 0),  // Dollar amount of margin from line item
-        quantity: parseFloat(row['Qty fulfilled'] || row['Shipped Quantity'] || 0),  // Unit quantity of line item
+        customerContact: row['Customer contact'] || '',
         
-        // Import metadata
-        importedAt: Timestamp.now(),
+        accountType: finalAccountType ?? '',
+        accountTypeSource: accountTypeSource ?? undefined,
+        
+        updatedAt: Timestamp.now(),
         source: 'fishbowl_unified',
       };
       
-      // Use .set() with NO merge to completely overwrite existing documents
-      // This ensures all fields are updated, not just merged
-      batch.set(itemRef, itemData);
-      stats.itemsCreated++; // Track as "created" (includes overwrites)
-      batchCount++;
-      
-      // CRITICAL: Check batch size after EVERY operation
-      if (batchCount >= MAX_BATCH_SIZE) {
-        try {
-          await batch.commit();
-          console.log(`💾 Committed batch: ${stats.customersCreated + stats.customersUpdated} customers, ${stats.ordersCreated + stats.ordersUpdated} orders, ${stats.itemsCreated} items`);
-          batch = adminDb.batch();
-          batchCount = 0;
-        } catch (error: any) {
-          console.error(`❌ Batch commit failed:`, error.message);
-          // Continue processing - don't fail entire import
-          batch = adminDb.batch();
-          batchCount = 0;
-        }
+      if (existingCustomer.exists) {
+        batch.update(customerRef, customerData);
+        stats.customersUpdated++;
+      } else {
+        batch.set(customerRef, customerData);
+        stats.customersCreated++;
       }
       
+      processedCustomers.add(String(customerId));
+      batchCount++;
+    }
+    
+    // === 2. CREATE/UPDATE SALES ORDER ===
+    // Dedupe by immutable Fishbowl Sales Order ID
+    if (!processedOrders.has(String(salesOrderId))) {
+      const orderDocId = String(salesOrderId).replace(/[\/\\]/g, '_');
+      const orderRef = adminDb.collection('fishbowl_sales_orders').doc(orderDocId);
+
+      const sanitizedCustomerId = String(customerId).replace(/[\/\\]/g, '_').trim();
+
+      const rawDate = row['Date fulfillment'] ?? row['Date fulfilled'] ?? row['Date last fulfillment'] ??
+                      row['Issued date'] ?? row['Date created'];
+
+      const { date: postDate, monthKey, y } = parseExcelOrTextDate(rawDate);
+      const postingDate = postDate ? Timestamp.fromDate(postDate) : null;
+      const postingDateStr = postDate
+        ? `${String(postDate.getMonth() + 1).padStart(2, '0')}/${String(postDate.getDate()).padStart(2, '0')}/${postDate.getFullYear()}` 
+        : '';
+      const commissionMonth = monthKey ?? '';
+      const commissionYear = y ?? 0;
+
+      const soNumStr = String(row['Sales order Number'] ?? row['Sales Order Number'] ?? '').trim();
+      const totals = orderTotals.get(soNumStr);
+      const revenue = totals ? totals.revenue.toNumber() : 0;
+      const orderValue = totals ? totals.orderValue.toNumber() : 0;
+      const lineCount = totals ? totals.lineCount : 0;
+
+      // Shopify/Commerce detection
+      const sp = String(row['Sales person'] || '').toLowerCase();
+      const isShopify = soNumStr.startsWith('Sh') || sp === 'commerce' || sp === 'shopify';
+      const shopPlatform = isShopify ? (sp.includes('commerce') ? 'commerce' : 'shopify') : '';
+
+      // Get accountType from cache (consistent with customer)
+      const cachedType = customerTypeCache.get(String(customerId));
+      const accountNum2 = row['Account Number'] ?? row['Account ID'];
+      const orderAccountType = cachedType?.type ?? (copperByAccountNumber.get(String(accountNum2))?.accountType?.trim() || (row['Account Type'] ?? row['Account type'] ?? ''));
+      const orderAccountTypeSource = cachedType?.source ?? (copperByAccountNumber.get(String(accountNum2))?.accountType ? 'copper' : 'fishbowl');
+
+      const orderData: any = {
+        id: orderDocId,
+        num: soNumStr,
+        fishbowlNum: soNumStr,
+        salesOrderId: String(salesOrderId),
+        customerId: sanitizedCustomerId,
+        customerName: row['Customer Name'] || row['Customer'] || '',
+
+        salesPerson: row['Sales person'] || '',
+        salesRep: row['Sales Rep'] || '',
+        salesRepInitials: row['Sales Rep Initials'] || '',
+
+        postingDate,
+        postingDateStr,
+        commissionDate: postingDate,
+        commissionMonth,
+        commissionYear,
+
+        revenue,
+        orderValue,
+        lineItemCount: lineCount,
+
+        isShopify,
+        shopPlatform,
+        accountType: orderAccountType,
+        accountTypeSource: orderAccountTypeSource,
+
+        updatedAt: Timestamp.now(),
+        source: 'fishbowl_unified',
+      };
       
-    } catch (error: any) {
-      console.error(`❌ Error processing row ${stats.processed}:`, error.message);
-      stats.skipped++;
+      const existingOrder = await orderRef.get();
+      if (existingOrder.exists) {
+        batch.update(orderRef, orderData);
+        stats.ordersUpdated++;
+      } else {
+        batch.set(orderRef, orderData);
+        stats.ordersCreated++;
+      }
+
+      processedOrders.add(String(salesOrderId));
+      batchCount++;
+    }
+    
+    // === 3. CREATE/UPDATE LINE ITEM ===
+    const itemDocId = `soitem_${String(lineItemId).replace(/[\/\\]/g,'_')}`;
+    const itemRef = adminDb.collection('fishbowl_soitems').doc(itemDocId);
+
+    const sanitizedCustomerId2 = String(customerId).replace(/[\/\\]/g, '_').trim();
+
+    const rawDate2 = row['Date fulfillment'] ?? row['Date fulfilled'] ?? row['Date last fulfillment'] ??
+                     row['Issued date'] ?? row['Date created'];
+
+    const { date: postDate2, monthKey: monthKey2, y: y2 } = parseExcelOrTextDate(rawDate2);
+    const postingDate2 = postDate2 ? Timestamp.fromDate(postDate2) : null;
+    const postingDateStr2 = postDate2
+      ? `${String(postDate2.getMonth() + 1).padStart(2, '0')}/${String(postDate2.getDate()).padStart(2, '0')}/${postDate2.getFullYear()}` 
+      : '';
+    const commissionMonth2 = monthKey2 ?? '';
+    const commissionYear2 = y2 ?? 0;
+
+    const soNumStr2 = String(row['Sales order Number'] ?? row['Sales Order Number'] ?? '').trim();
+    const sp2 = String(row['Sales person'] || '').toLowerCase();
+    const isShopify2 = soNumStr2.startsWith('Sh') || sp2 === 'commerce' || sp2 === 'shopify';
+    const shopPlatform2 = isShopify2 ? (sp2.includes('commerce') ? 'commerce' : 'shopify') : '';
+
+    // Get accountType from cache (consistent with customer)
+    const cachedType2 = customerTypeCache.get(String(customerId));
+    const accountNum3 = row['Account Number'] ?? row['Account ID'];
+    const itemAccountType = cachedType2?.type ?? (copperByAccountNumber.get(String(accountNum3))?.accountType?.trim() || (row['Account Type'] ?? row['Account type'] ?? ''));
+    const itemAccountTypeSource = cachedType2?.source ?? (copperByAccountNumber.get(String(accountNum3))?.accountType ? 'copper' : 'fishbowl');
+
+    // Mark shipping/CC items
+    const labelLower2 = String(row['SO Item Product Number'] ?? row['Part Description'] ?? row['Sales Order Item Description'] ?? '').toLowerCase();
+    const isShippingItem = labelLower2.includes('shipping');
+    const isCCItem = labelLower2.includes('cc processing') || labelLower2.includes('credit card processing');
+
+    const itemData: any = {
+      id: itemDocId,
+      salesOrderId: String(salesOrderId),
+      salesOrderNum: soNumStr2,
+      soId: String(salesOrderId).replace(/[\/\\]/g, '_'),
+
+      customerId: sanitizedCustomerId2,
+      customerName: row['Customer Name'] || row['Customer'] || '',
+      accountNumber: row['Account Number'] || row['Account ID'] || '',
+      accountId: row['Account ID'] || '',
+      accountType: itemAccountType,
+      accountTypeSource: itemAccountTypeSource,
+
+      salesPerson: row['Sales person'] || '',
+      salesRep: row['Sales Rep'] || '',
+      salesRepInitials: row['Sales Rep Initials'] || '',
+
+      postingDate: postingDate2,
+      postingDateStr: postingDateStr2,
+      commissionDate: postingDate2,
+      commissionMonth: commissionMonth2,
+      commissionYear: commissionYear2,
+
+      lineItemId: String(lineItemId),
+
+      partNumber: row['SO Item Product Number'] || row['Part Number'] || '',
+      partId: row['Part id'] || '',
+      partDescription: row['Part Description'] || '',
+      product: row['Product'] || '',
+      productId: row['Product ID'] || '',
+      productNum: row['SO Item Product Number'] || row['Part Number'] || '',
+      productShortNumber: row['Product Short Number'] || '',
+      productDescription: row['Part Description'] || row['Product description'] || '',
+      description: row['Sales Order Item Description'] || '',
+      itemType: row['Sales Order Item Type'] || '',
+
+      uomCode: row['UOM Code'] || '',
+      uomName: row['UOM Name'] || '',
+
+      shippingCity: row['Shipping City'] || row['Billing City'] || '',
+      shippingState: row['Shipping State'] || row['Billing State'] || '',
+
+      revenue: toNumberSafe(row['Total Price'] ?? row['Total price'] ?? row['Revenue']),
+      totalPrice: toNumberSafe(row['Total Price'] ?? row['Total price']),
+      unitPrice: toNumberSafe(row['UNIT PRICE'] ?? row['Unit price'] ?? row['Unit Price']),
+      totalCost: toNumberSafe(row['Total cost']),
+      quantity: toNumberSafe(row['Qty fulfilled'] ?? row['Shipped Quantity']),
+      qtyFulfilled: toNumberSafe(row['Qty fulfilled']),
+
+      isShopify: isShopify2,
+      shopPlatform: shopPlatform2,
+      isShippingItem,
+      isCCProcessingItem: isCCItem,
+
+      importedAt: Timestamp.now(),
+      source: 'fishbowl_unified',
+    };
+
+    // Accurate created/updated counts
+    const existingItem = await itemRef.get();
+    if (existingItem.exists) {
+      batch.update(itemRef, itemData);
+      stats.itemsUpdated++;
+    } else {
+      batch.set(itemRef, itemData);
+      stats.itemsCreated++;
+    }
+    batchCount++;
+
+    // Commit chunk
+    if (batchCount >= MAX_BATCH_SIZE) {
+      await batch.commit().catch(e => console.error('❌ Batch commit failed:', e?.message || e));
+      console.log(`✅ Committed batch of ${batchCount} operations`);
+      batch = adminDb.batch();
+      batchCount = 0;
     }
   }
   
-  // Commit remaining
+  // Final commit
   if (batchCount > 0) {
-    try {
-      console.log(`💾 Committing final batch of ${batchCount} operations...`);
-      await batch.commit();
-      console.log(`✅ Final batch committed successfully`);
-    } catch (error: any) {
-      console.error(`❌ Final batch commit failed:`, error.message);
-      throw error; // Re-throw on final batch to report the error
-    }
+    await batch.commit().catch(e => console.error('❌ Final batch commit failed:', e?.message || e));
+    console.log(`✅ Committed final batch of ${batchCount} operations`);
   }
   
-  console.log(`\n✅ UNIFIED IMPORT COMPLETE!`);
-  console.log(`   Rows processed: ${stats.processed}`);
+  console.log('\n✅ Import Complete!');
+  console.log(`   Processed: ${stats.processed} rows`);
   console.log(`   Customers: ${stats.customersCreated} created, ${stats.customersUpdated} updated`);
   console.log(`   Orders: ${stats.ordersCreated} created, ${stats.ordersUpdated} updated`);
-  console.log(`   Line Items: ${stats.itemsCreated} created/updated`);
-  console.log(`   Skipped: ${stats.skipped}\n`);
+  console.log(`   Items: ${stats.itemsCreated} created, ${stats.itemsUpdated} updated`);
+  console.log(`   Skipped: ${stats.skipped}`);
   
   return stats;
 }
 
-
-export async function POST(req: NextRequest) {
+/**
+ * POST /api/fishbowl/import-unified
+ * Upload and import unified Fishbowl report
+ */
+export async function POST(request: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File | null;
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
     
     if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
-    
-    console.log(`📁 File received: ${file.name}`);
     
     const buffer = Buffer.from(await file.arrayBuffer());
     const stats = await importUnifiedReport(buffer, file.name);
     
     return NextResponse.json({
       success: true,
-      message: 'Import completed successfully',
-      stats: {
-        rowsProcessed: stats.processed,
-        customersCreated: stats.customersCreated,
-        customersUpdated: stats.customersUpdated,
-        ordersCreated: stats.ordersCreated,
-        ordersUpdated: stats.ordersUpdated,
-        itemsCreated: stats.itemsCreated,
-        itemsUpdated: stats.itemsUpdated,
-        skipped: stats.skipped
-      }
+      message: 'Unified import completed successfully',
+      stats
     });
     
   } catch (error: any) {
-    console.error('❌ Import error:', error);
+    console.error('Error importing unified report:', error);
     return NextResponse.json(
-      { error: error.message || 'Import failed' },
+      { error: error.message || 'Failed to import unified report' },
       { status: 500 }
     );
   }

@@ -3,16 +3,19 @@
 ## Data Sources & Field Mappings
 
 ### 1. Customer Segment Detection
-**Source:** `copper_companies` collection  
-**Field:** `Account Type cf_675914`  
-**Values:**
+
+**Source:** `copper_companies` collection**Field:** `Account Type cf_675914`**Values:**
+
 - "Distributor" → Distribution segment
 - "Wholesale" → Wholesale segment
 - Other values → Default to Distribution
 
+  ![1761007375773](image/MONTHLY_COMMISSION_IMPLEMENTATION/1761007375773.png)
+
 ### 2. Sales Order Data
-**Source:** `fishbowl_sales_orders` collection  
-**Key Fields:**
+
+**Source:** `fishbowl_sales_orders` collection**Key Fields:**
+
 - `salesPerson` - Fishbowl username (e.g., "BenW", "BrandonG")
 - `customerId` - Links to Copper company
 - `revenue` - Commission base amount
@@ -22,14 +25,18 @@
 - `customerName` - Display name
 
 ### 3. Rep Transfer Detection
+
 **Logic:** Query historical `fishbowl_sales_orders` for same `customerId`
+
 - If `salesPerson` field changes between orders → Rep transfer occurred
 - Example:
   - Order 1: customerId="7", salesPerson="BenW"
   - Order 2: customerId="7", salesPerson="BrandonG" ← Transfer detected!
 
 ### 4. Customer Status Calculation
+
 **Logic:** Look at order history for the customer + current sales rep
+
 ```javascript
 function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
   // Get last order from THIS rep for THIS customer
@@ -57,8 +64,9 @@ function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
 ```
 
 ### 5. Commission Timing
-**Trigger:** Order has `postingDate` field filled  
-**Payment Period:** Monthly (1st to end of month)  
+
+**Trigger:** Order has `postingDate` field filled
+**Payment Period:** Monthly (1st to end of month)
 **Historical Data:** Start from January 1, 2024 for testing
 
 ---
@@ -66,6 +74,7 @@ function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
 ## Firestore Collections
 
 ### Collection: `settings/commission_rates`
+
 ```javascript
 {
   // Commission rate matrix
@@ -146,6 +155,7 @@ function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
 ```
 
 ### Collection: `monthly_commissions`
+
 ```javascript
 {
   id: "BenW_2024-05_order_4255",
@@ -183,6 +193,7 @@ function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
 ```
 
 ### Collection: `monthly_commission_summary`
+
 ```javascript
 {
   id: "BenW_2024-05",
@@ -237,11 +248,12 @@ function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
 ## Calculation Algorithm
 
 ### Step 1: Process Sales Order
+
 ```javascript
 async function processOrderCommission(order) {
-  // 1. Get customer segment from Copper
-  const customer = await getCustomerFromCopper(order.customerId);
-  const segment = customer?.["Account Type cf_675914"] || "Distributor";
+  // 1. Get customer account type from Fishbowl (SOURCE OF TRUTH)
+  const customer = await getCustomerFromFishbowl(order.customerId);
+  const accountType = customer?.accountType || "Retail";
   
   // 2. Get rep details
   const rep = await getRepBySalesPerson(order.salesPerson);
@@ -289,24 +301,24 @@ async function processOrderCommission(order) {
     salesPerson: order.salesPerson,
     repName: rep.name,
     repTitle: rep.title,
-    
+  
     orderId: order.salesOrderId,
     orderNum: order.num,
     customerId: order.customerId,
     customerName: order.customerName,
-    
+  
     customerSegment: segment,
     customerStatus: customerStatus,
-    
+  
     orderRevenue: order.revenue,
     commissionRate: rate.commissionPercent,
     commissionAmount: commissionAmount,
-    
+  
     orderDate: order.postingDate,
     postingDate: order.postingDate,
     commissionMonth: order.commissionMonth,
     commissionYear: order.commissionYear,
-    
+  
     calculatedAt: new Date(),
     paidStatus: "pending",
     notes: `${customerStatus} - ${segment}`
@@ -318,6 +330,7 @@ async function processOrderCommission(order) {
 ```
 
 ### Step 2: Get Customer Status
+
 ```javascript
 async function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
   // Get all orders for this customer before this order
@@ -351,6 +364,7 @@ async function getCustomerStatus(customerId, currentSalesPerson, orderDate) {
 ```
 
 ### Step 3: Aggregate Monthly Summary
+
 ```javascript
 async function aggregateMonthlyCommissions(salesPerson, month, year) {
   const commissions = await db.collection('monthly_commissions')
@@ -374,7 +388,7 @@ async function aggregateMonthlyCommissions(salesPerson, month, year) {
     summary.totalOrders++;
     summary.totalRevenue += c.orderRevenue;
     summary.totalCommission += c.commissionAmount;
-    
+  
     // By segment
     const segment = c.customerSegment.toLowerCase();
     if (summary[segment]) {
@@ -382,7 +396,7 @@ async function aggregateMonthlyCommissions(salesPerson, month, year) {
       summary[segment].revenue += c.orderRevenue;
       summary[segment].commission += c.commissionAmount;
     }
-    
+  
     // By status
     const statusMap = {
       'new': 'new',
@@ -407,6 +421,7 @@ async function aggregateMonthlyCommissions(salesPerson, month, year) {
 ## API Endpoints
 
 ### POST `/api/calculate-monthly-commissions`
+
 ```javascript
 {
   month: "05",
@@ -425,6 +440,7 @@ Response:
 ```
 
 ### GET `/api/monthly-commissions/:salesPerson/:month/:year`
+
 ```javascript
 Response:
 {
@@ -438,6 +454,7 @@ Response:
 ## Settings Page - New Tab
 
 ### Tab Structure:
+
 1. **Quarterly Bonus** (existing)
 2. **Monthly Commissions** (NEW)
 3. **Sales Team** (existing)
@@ -488,24 +505,28 @@ Response:
 ## Implementation Phases
 
 ### Phase 1: Settings UI (Week 1)
+
 - ✅ Add tabs to Settings page
 - ✅ Build Commission Rate Matrix editor
 - ✅ Add Special Rules section
 - ✅ Save/load from Firestore
 
 ### Phase 2: Calculation Engine (Week 2)
+
 - ✅ Create `processOrderCommission()` function
 - ✅ Implement customer status detection
 - ✅ Handle rep transfer logic
 - ✅ Save to `monthly_commissions` collection
 
 ### Phase 3: Bulk Processing (Week 3)
+
 - ✅ Create API endpoint to process all orders
 - ✅ Process historical data (Jan 2024 - present)
 - ✅ Generate monthly summaries
 - ✅ Add progress indicators
 
 ### Phase 4: Reports & UI (Week 4)
+
 - ✅ Add Monthly Commissions page
 - ✅ Show commission breakdown by month
 - ✅ Export to CSV
@@ -516,11 +537,13 @@ Response:
 ## Testing Plan
 
 ### Test Data:
+
 - Start Date: January 1, 2024
 - End Date: Current month
 - Test Reps: BenW, BrandonG, JSimmons, DerekW
 
 ### Test Scenarios:
+
 1. ✅ New customer order (12+ months inactive)
 2. ✅ Active customer order (< 6 months)
 3. ✅ Maintaining customer order (6-12 months)

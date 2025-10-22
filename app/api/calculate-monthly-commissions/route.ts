@@ -3,6 +3,57 @@ import { adminDb } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import Decimal from 'decimal.js';
 
+// Helper functions for safe operations
+export function getMonthWindow(year: number, monthTwo: string) {
+  const mIdx = parseInt(monthTwo, 10) - 1; // 0-based
+  const periodStart = new Date(year, mIdx, 1);
+  const periodEnd = new Date(year, mIdx + 1, 0); // last day of target month
+  return { periodStart, periodEnd };
+}
+
+export async function deleteByMonthInChunks(
+  collectionName: string,
+  monthField: string,
+  commissionMonth: string,
+  chunkSize = 450
+) {
+  let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+  for (;;) {
+    let q = adminDb.collection(collectionName)
+      .where(monthField, '==', commissionMonth)
+      .limit(chunkSize);
+
+    if (lastDoc) q = q.startAfter(lastDoc);
+
+    const snap = await q.get();
+    if (snap.empty) break;
+
+    const batch = adminDb.batch();
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+
+    lastDoc = snap.docs[snap.docs.length - 1];
+    if (snap.size < chunkSize) break;
+  }
+}
+
+export async function markProgress(
+  ref: FirebaseFirestore.DocumentReference,
+  data: Record<string, any>
+) {
+  try {
+    await ref.set(
+      {
+        ...data,
+        updatedAt: Timestamp.now(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.error('Progress update failed:', e);
+  }
+}
+
 /**
  * Calculate monthly commissions from Fishbowl sales orders
  * POST /api/calculate-monthly-commissions
@@ -25,10 +76,65 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`Calculating monthly commissions for ${year}-${month}${salesPerson ? ` (${salesPerson})` : ' (all reps)'}`);
+    // Generate calculation ID
+    const calcId = `calc_${Date.now()}`;
+    
+    // WARNING: If deployed to serverless, this background promise can be killed after the response.
+    // Prefer a Firestore-triggered Cloud Function in production.
+    calculateCommissionsWithProgress(calcId, month, year, salesPerson).catch(error => {
+      console.error('❌ Background calculation failed:', error);
+    });
+    
+    // Return immediately so frontend can start polling
+    return NextResponse.json({
+      success: true,
+      calcId: calcId,
+      message: 'Calculation started - check progress',
+      processing: true
+    });
 
-    // Define commission month early for spiff filtering
-    const commissionMonth = `${year}-${month.padStart(2, '0')}`;
+  } catch (error: any) {
+    console.error('Error starting commission calculation:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to start calculation' },
+      { status: 500 }
+    );
+  }
+}
+
+async function calculateCommissionsWithProgress(
+  calcId: string,
+  month: string,
+  year: number,
+  salesPerson?: string
+) {
+  const progressRef = adminDb.collection('commission_calc_progress').doc(calcId);
+  const commissionMonth = `${year}-${month.padStart(2, '0')}`;
+  const { periodStart, periodEnd } = getMonthWindow(year, month);
+  
+  // Initialize progress with safe helper
+  await markProgress(progressRef, {
+    status: 'processing',
+    totalOrders: 0,
+    currentOrder: 0,
+    percentage: 0,
+    currentRep: '',
+    currentCustomer: '',
+    currentOrderNum: '',
+    stats: {
+      commissionsCalculated: 0,
+      totalCommission: 0,
+      adminSkipped: 0,
+      shopifySkipped: 0,
+      retailSkipped: 0,
+      inactiveRepSkipped: 0
+    },
+    startedAt: Timestamp.now()
+  });
+  
+  try {
+    console.log(`Calculating monthly commissions for ${year}-${month}${salesPerson ? ` (${salesPerson})` : ' (all reps)'}`);
+    console.log(`Period: ${periodStart.toISOString().split('T')[0]} to ${periodEnd.toISOString().split('T')[0]}`);
 
     // Get commission rates from settings (load all title-specific rate documents)
     const settingsSnapshot = await adminDb.collection('settings').get();
@@ -44,11 +150,22 @@ export async function POST(request: NextRequest) {
     
     console.log(`Loaded commission rates for ${commissionRatesByTitle.size} titles`);
     
+    // DEBUG: Log all loaded rates
+    commissionRatesByTitle.forEach((rates, title) => {
+      console.log(`📋 LOADED RATES for "${title}":`, rates.rates?.length || 0, 'rates');
+      if (rates.rates) {
+        rates.rates.forEach((rate: any) => {
+          console.log(`  - ${rate.segmentId} | ${rate.status} = ${rate.percentage}%`);
+        });
+      }
+    });
+    
     if (commissionRatesByTitle.size === 0) {
-      return NextResponse.json(
-        { error: 'Commission rates not configured for any titles' },
-        { status: 400 }
-      );
+      await markProgress(progressRef, {
+        status: 'failed',
+        error: 'Commission rates not configured for any titles'
+      });
+      return;
     }
 
     // Get commission rules from settings
@@ -60,6 +177,12 @@ export async function POST(request: NextRequest) {
     };
     console.log('Commission rules:', commissionRules);
 
+    // 🔥 Clear previous month records using chunked deletions (FIXED)
+    console.log('🗑️ Clearing existing commission data...');
+    await deleteByMonthInChunks('monthly_commissions', 'commissionMonth', commissionMonth);
+    await deleteByMonthInChunks('commission_calculation_logs', 'commissionMonth', commissionMonth);
+    console.log('✅ Existing data cleared');
+
     // Load active spiffs for the period
     const spiffsSnapshot = await adminDb.collection('spiffs')
       .where('isActive', '==', true)
@@ -70,10 +193,8 @@ export async function POST(request: NextRequest) {
       const spiff = doc.data();
       const startDate = new Date(spiff.startDate);
       const endDate = spiff.endDate ? new Date(spiff.endDate) : null;
-      const periodStart = new Date(`${year}-${month.padStart(2, '0')}-01`);
-      const periodEnd = new Date(year, parseInt(month), 0); // Last day of month
       
-      // Check if spiff is active during this period
+      // Check if spiff is active during this period (using corrected month window)
       if (startDate <= periodEnd && (!endDate || endDate >= periodStart)) {
         activeSpiffs.set(spiff.productNum, { id: doc.id, ...spiff });
         console.log(`  📌 Spiff: ${spiff.productNum} | Type: "${spiff.incentiveType}" | Value: $${spiff.incentiveValue}`);
@@ -166,6 +287,27 @@ export async function POST(request: NextRequest) {
 
     console.log(`✅ Found ${ordersSnapshot.size} orders to process`);
 
+    // Initialize progress tracking in Firestore
+    await progressRef.set({
+      status: 'processing',
+      totalOrders: ordersSnapshot.size,
+      currentOrder: 0,
+      percentage: 0,
+      currentRep: '',
+      currentCustomer: '',
+      currentOrderNum: '',
+      stats: {
+        commissionsCalculated: 0,
+        totalCommission: 0,
+        adminSkipped: 0,
+        shopifySkipped: 0,
+        retailSkipped: 0,
+        inactiveRepSkipped: 0
+      },
+      startedAt: Timestamp.now(),
+      updatedAt: Timestamp.now()
+    });
+
     let processed = 0;
     let commissionsCalculated = 0;
     let totalCommission = 0;
@@ -180,11 +322,76 @@ export async function POST(request: NextRequest) {
     
     // Track spiff details for summary
     const spiffDetails: any[] = [];
+    
+    // Track processed orders to prevent duplicates
+    const processedOrders = new Set();
 
     // Process each order
     for (const orderDoc of ordersSnapshot.docs) {
       const order = orderDoc.data();
       processed++;
+      
+      // Stronger duplicate key (prefer immutable salesOrderId)
+      const orderKey = `${order.salesOrderId || orderDoc.id}`;
+      if (processedOrders.has(orderKey)) {
+        console.log(`⚠️ DUPLICATE ORDER DETECTED: ${order.salesOrderId || orderDoc.id} - ${order.num} - Skipping`);
+        continue;
+      }
+      processedOrders.add(orderKey);
+      
+      // CRITICAL FIX: Check if order has any fulfilled line items (qty > 0)
+      const lineItemsSnapshot = await adminDb.collection('fishbowl_soitems')
+        .where('salesOrderId', '==', order.salesOrderId)
+        .get();
+      
+      let hasFulfilledItems = false;
+      let totalFulfilledQty = 0;
+      
+      if (!lineItemsSnapshot.empty) {
+        for (const lineItemDoc of lineItemsSnapshot.docs) {
+          const lineItem = lineItemDoc.data();
+          const qty = lineItem.quantity || 0;
+          totalFulfilledQty += qty;
+          if (qty > 0) {
+            hasFulfilledItems = true;
+          }
+        }
+      }
+      
+      // Skip orders with no fulfilled items (all qty = 0)
+      if (!hasFulfilledItems || totalFulfilledQty === 0) {
+        console.log(`⚠️ ZERO QUANTITY ORDER DETECTED: ${order.num} - ${order.customerName} - Total Qty: ${totalFulfilledQty} - Skipping`);
+        continue;
+      }
+      
+      // DEBUG: Log order processing for Ben Wallner
+      if (order.salesPerson === 'Ben Wallner' || order.salesPerson === 'BWallner' || order.salesPerson === 'BenW' || order.salesPerson === 'Ben') {
+        console.log(`🔍 PROCESSING ORDER: ${order.num} - ${order.customerName} - $${order.revenue} - Rep: "${order.salesPerson}"`);
+      }
+
+      // Update progress every 5 orders using safe helper
+      const shouldUpdateUI = processed % 5 === 0 || processed === ordersSnapshot.size;
+      if (shouldUpdateUI) {
+        const percentage = ((processed / ordersSnapshot.size) * 100);
+        
+        await markProgress(progressRef, {
+          status: 'processing',
+          currentOrder: processed,
+          percentage: Math.round(percentage * 10) / 10,
+          currentRep: order.salesPerson || '',
+          currentCustomer: order.customerName || '',
+          currentOrderNum: order.num || '',
+          stats: {
+            commissionsCalculated,
+            totalCommission,
+            adminSkipped: skippedCounts.admin,
+            shopifySkipped: skippedCounts.shopify,
+            retailSkipped: skippedCounts.retail,
+            inactiveRepSkipped: skippedCounts.inactiveRep
+          }
+        });
+        console.log(`📊 Progress updated: ${processed}/${ordersSnapshot.size} (${percentage.toFixed(1)}%)`);
+      }
 
       // Skip admin/house account orders (no commission)
       if (order.salesPerson === 'admin' || order.salesPerson === 'Admin') {
@@ -193,7 +400,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Skip Commerce/Shopify orders (no commission on direct e-commerce)
-      if (order.salesPerson === 'Commerce' || order.salesPerson === 'commerce' || 
+      const sp = (order.salesPerson || '').toUpperCase();
+      if (sp === 'SHOPIFY' || sp === 'COMMERCE' || 
           order.num?.startsWith('Sh') || order.orderNum?.startsWith('Sh')) {
         skippedCounts.shopify++;
         continue;
@@ -215,14 +423,26 @@ export async function POST(request: NextRequest) {
       const accountType = customer?.accountType || 'Retail';
       const manualTransferStatus = customer?.transferStatus; // Manual override from UI
       
+      // DEBUG: Log customer mapping for problematic customers
+      if (order.customerName?.includes('CK Import') || order.customerName?.includes('Allegria')) {
+        console.log(`🔍 CUSTOMER MAPPING DEBUG: ${order.customerName}`);
+        console.log(`   Order customerId: "${order.customerId}"`);
+        console.log(`   Order customerNum: "${order.customerNum}"`);
+        console.log(`   Order accountNumber: "${order.accountNumber}"`);
+        console.log(`   Customer found:`, customer ? 'YES' : 'NO');
+        console.log(`   Customer accountType: "${accountType}"`);
+        console.log(`   Customer data:`, customer);
+      }
+      
       // Skip Retail accounts (no commission)
       if (accountType === 'Retail') {
         skippedCounts.retail++;
         continue;
       }
 
-      // Get customer segment from Copper
-      const customerSegment = await getCustomerSegment(order.customerId);
+      // Use accountType from Fishbowl customer data (NOT Copper segment)
+      // accountType is already loaded from customersMap above
+      const customerSegment = accountType; // Use Fishbowl accountType as the segment
       
       // Determine customer status (check manual override first)
       let customerStatus: string;
@@ -249,12 +469,14 @@ export async function POST(request: NextRequest) {
       }
 
       // Get commission rate
-      const rate = getCommissionRate(
+      const rateResult = getCommissionRate(
         repCommissionRates,
         rep.title,
         customerSegment,
         customerStatus
       );
+      const rate = rateResult.rate;
+      const rateFound = rateResult.found;
 
       if (!rate) {
         console.log(`No rate found for ${rep.title}, ${customerSegment}, ${customerStatus}`);
@@ -312,42 +534,44 @@ export async function POST(request: NextRequest) {
       }
 
       // Calculate commission using Decimal.js for precision
-      let commissionAmount = 0;
-      if (customerStatus === 'rep_transfer') {
-        const specialRule = repCommissionRates?.specialRules?.repTransfer;
-        if (specialRule?.enabled) {
-          // Determine which rate to use based on customer segment
-          let transferRate = specialRule.percentFallback || 2.0; // Default fallback
-          
-          if (specialRule.segmentRates) {
-            const segmentLower = customerSegment.toLowerCase();
-            if (segmentLower.includes('wholesale') && specialRule.segmentRates.wholesale) {
-              transferRate = specialRule.segmentRates.wholesale;
-              console.log(`  Using Wholesale transfer rate: ${transferRate}%`);
-            } else if (segmentLower.includes('distributor') && specialRule.segmentRates.distributor) {
-              transferRate = specialRule.segmentRates.distributor;
-              console.log(`  Using Distributor transfer rate: ${transferRate}%`);
-            } else {
-              console.log(`  Using default transfer rate: ${transferRate}% (segment: ${customerSegment})`);
-            }
-          }
-          
-          const flatFee = specialRule.flatFee || 0;
-          const percentCommission = new Decimal(orderAmount).times(transferRate).dividedBy(100).toNumber();
-          commissionAmount = specialRule.useGreater 
-            ? Math.max(flatFee, percentCommission)
-            : (flatFee > 0 ? flatFee : percentCommission);
-        }
-      } else {
-        // Precise decimal calculation: orderAmount × (rate / 100)
-        commissionAmount = new Decimal(orderAmount).times(rate).dividedBy(100).toNumber();
-      }
+      const commissionAmount = new Decimal(orderAmount).times(rate).dividedBy(100).toNumber();
 
       totalCommission += commissionAmount;
       commissionsCalculated++;
 
       // Log successful commission calculation
       console.log(`✅ COMMISSION CALCULATED: Order ${order.num} | ${rep.name} | ${customerSegment} | ${customerStatus} | $${orderAmount.toFixed(2)} × ${rate}% = $${commissionAmount.toFixed(2)}`);
+
+      // Save calculation log for UI display
+      const logId = `log_${order.salesOrderId}_${Date.now()}`;
+      const calculationLogRef = adminDb.collection('commission_calculation_logs').doc(logId);
+      
+      try {
+        await calculationLogRef.set({
+        id: logId,
+        commissionMonth: commissionMonth,
+        orderNum: order.num,
+        orderId: order.salesOrderId,
+        customerName: order.customerName,
+        repName: rep.name,
+        repTitle: rep.title,
+        salesPerson: order.salesPerson,
+        customerSegment: customerSegment,
+        customerStatus: customerStatus,
+        accountType: accountType,
+        orderAmount: orderAmount,
+        commissionRate: rate,
+        commissionAmount: commissionAmount,
+        rateSource: rateFound ? 'configured' : 'default',
+        calculatedAt: new Date(),
+        orderDate: order.postingDate,
+        notes: `${accountType} - ${customerStatus} - ${customerSegment}`
+      });
+      
+      console.log(`📝 CALCULATION LOG SAVED: ${logId} for order ${order.num}`);
+      } catch (error) {
+        console.error(`❌ FAILED TO SAVE CALCULATION LOG for order ${order.num}:`, error);
+      }
 
       // Save commission record
       const commissionId = `${order.salesPerson}_${commissionMonth}_order_${order.salesOrderId}`;
@@ -529,6 +753,11 @@ export async function POST(request: NextRequest) {
       repSummary.revenue += order.revenue;
       repSummary.commission += commissionAmount;
       repSummary.spiffs += orderSpiffTotal;
+      
+      // DEBUG: Track Ben Wallner's running totals
+      if (order.salesPerson === 'Ben Wallner' || order.salesPerson === 'BWallner') {
+        console.log(`   💰 Commission: $${commissionAmount.toFixed(2)} | Running Total: $${repSummary.commission.toFixed(2)} | Orders: ${repSummary.orders}`);
+      }
     }
 
     // Create monthly summaries
@@ -618,38 +847,75 @@ export async function POST(request: NextRequest) {
       spiffsByRep.get(spiff.repName).push(spiff);
     });
 
-    return NextResponse.json({
-      success: true,
-      processed: processed,
-      commissionsCalculated: commissionsCalculated,
-      totalCommission: totalCommission,
-      repBreakdown: repBreakdown,
-      skippedCounts: skippedCounts,
-      summary: Object.fromEntries(commissionsByRep),
-      spiffDetails: spiffDetails,
-      spiffsByRep: Object.fromEntries(spiffsByRep),
-      totalSpiffs: spiffDetails.reduce((sum, s) => sum + s.spiffAmount, 0)
+    // Mark calculation as complete in Firestore
+    await progressRef.update({
+      status: 'complete',
+      currentOrder: processed,
+      percentage: 100,
+      stats: {
+        commissionsCalculated,
+        totalCommission,
+        adminSkipped: skippedCounts.admin,
+        shopifySkipped: skippedCounts.shopify,
+        retailSkipped: skippedCounts.retail,
+        inactiveRepSkipped: skippedCounts.inactiveRep
+      },
+      completedAt: Timestamp.now(),
+      updatedAt: Timestamp.now()
     });
+
+    console.log('✅ Calculation complete!');
 
   } catch (error: any) {
     console.error('Error calculating monthly commissions:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to calculate commissions' },
-      { status: 500 }
-    );
+    
+    // Mark as failed in progress
+    try {
+      await progressRef.update({
+        status: 'failed',
+        error: error.message,
+        updatedAt: Timestamp.now()
+      });
+    } catch (updateErr) {
+      console.error('Failed to update error status:', updateErr);
+    }
   }
 }
 
 /**
  * Get customer segment from Copper
+ * First tries to look up by Fishbowl customerId, then falls back to name matching
  */
-async function getCustomerSegment(customerId: string): Promise<string> {
+async function getCustomerSegment(customerId: string, customerName?: string): Promise<string> {
   try {
+    // Try direct ID lookup first (in case Copper ID matches Fishbowl ID)
     const customerDoc = await adminDb.collection('copper_companies').doc(customerId).get();
     if (customerDoc.exists) {
       const data = customerDoc.data();
-      return data?.['Account Type cf_675914'] || 'Distributor';
+      const segment = data?.['Account Type cf_675914'];
+      if (segment) {
+        console.log(`✅ Found segment by ID for ${customerId}: ${segment}`);
+        return segment;
+      }
     }
+    
+    // Fallback: Try to find by name match
+    if (customerName) {
+      const nameQuery = await adminDb.collection('copper_companies')
+        .where('name', '==', customerName)
+        .limit(1)
+        .get();
+      
+      if (!nameQuery.empty) {
+        const data = nameQuery.docs[0].data();
+        const segment = data?.['Account Type cf_675914'] || 'Distributor';
+        console.log(`✅ Found segment by name for "${customerName}": ${segment}`);
+        return segment;
+      }
+      
+      console.log(`⚠️  No Copper match for "${customerName}" (ID: ${customerId}) - defaulting to Distributor`);
+    }
+    
     return 'Distributor'; // Default
   } catch (error) {
     console.error(`Error getting customer segment for ${customerId}:`, error);
@@ -764,7 +1030,7 @@ async function getCustomerStatus(
 
     // Check for rep transfer (non-reorg scenario)
     if (lastOrder.salesPerson !== currentSalesPerson) {
-      return 'rep_transfer';
+      return 'transferred';
     }
 
     // Same rep, check customer age (time since FIRST order)
@@ -794,12 +1060,11 @@ function getCommissionRate(
   title: string,
   segment: string,
   status: string
-): number {
+): { rate: number; found: boolean } {
   // Map status values to match what we save in the UI
   const statusMap: { [key: string]: string } = {
     'new': 'new_business',
-    'rep_transfer': 'new_business', // Old rep transfers use new business rate (8%)
-    'transferred': 'transferred', // July 2025 reorg transferred customers (2%)
+    'transferred': 'transferred', // All transferred customers (rate depends on reorg rule settings)
     'own': 'new_business', // Manual override: rep acquired customer themselves (8%)
     '6month': '6_month_active',
     '12month': '12_month_active'
@@ -807,12 +1072,25 @@ function getCommissionRate(
   
   const mappedStatus = statusMap[status] || status;
   
-  // Map segment to segmentId
+  // Map Fishbowl accountType to commission rate segmentId
   const segmentLower = segment.toLowerCase();
-  let segmentId = 'distributor'; // default
+  let segmentId: 'wholesale' | 'distributor' | 'retail' = 'distributor';
+  
   if (segmentLower.includes('wholesale')) {
     segmentId = 'wholesale';
+  } else if (segmentLower.includes('distributor')) {
+    segmentId = 'distributor';
+  } else if (segmentLower.includes('retail')) {
+    segmentId = 'retail';
   }
+  
+  // If retail leaks in here, give 0% to surface config issues
+  if (segmentId === 'retail') {
+    console.log(`⚠️ RETAIL ACCOUNT LEAKED THROUGH: ${segment} - returning 0% rate`);
+    return { rate: 0, found: true };
+  }
+  
+  console.log(` Account Type mapping: "${segment}" → segmentId: "${segmentId}"`);
   
   // Look up rate in the rates array
   if (commissionRates?.rates && Array.isArray(commissionRates.rates)) {
@@ -824,8 +1102,8 @@ function getCommissionRate(
     );
     
     if (rate && typeof rate.percentage === 'number') {
-      console.log(`✅ Found rate: ${title} | ${segmentId} | ${mappedStatus} = ${rate.percentage}%`);
-      return rate.percentage;
+      console.log(` Found rate: ${title} | ${segmentId} | ${mappedStatus} = ${rate.percentage}%`);
+      return { rate: rate.percentage, found: true };
     }
   }
   
@@ -833,17 +1111,17 @@ function getCommissionRate(
   console.log(`⚠️ No rate found for ${title} | ${segmentId} | ${mappedStatus}, using defaults`);
   
   // Transferred customers always get 2% (July 2025 reorg rule)
-  if (mappedStatus === 'transferred') return 2.0;
+  if (mappedStatus === 'transferred') return { rate: 2.0, found: false };
   
   if (segmentId === 'distributor') {
-    if (mappedStatus === 'new_business') return 8.0;
-    if (mappedStatus === '6_month_active') return 5.0;
-    if (mappedStatus === '12_month_active') return 3.0;
+    if (mappedStatus === 'new_business') return { rate: 8.0, found: false };
+    if (mappedStatus === '6_month_active') return { rate: 5.0, found: false };
+    if (mappedStatus === '12_month_active') return { rate: 3.0, found: false };
   } else if (segmentId === 'wholesale') {
-    if (mappedStatus === 'new_business') return 10.0;
-    if (mappedStatus === '6_month_active') return 7.0;
-    if (mappedStatus === '12_month_active') return 5.0;
+    if (mappedStatus === 'new_business') return { rate: 10.0, found: false };
+    if (mappedStatus === '6_month_active') return { rate: 7.0, found: false };
+    if (mappedStatus === '12_month_active') return { rate: 5.0, found: false };
   }
   
-  return 5.0; // Final fallback
+  return { rate: 5.0, found: false }; // Final fallback
 }

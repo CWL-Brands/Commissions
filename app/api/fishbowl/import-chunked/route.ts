@@ -76,23 +76,21 @@ export async function POST(req: NextRequest) {
       
       console.log(`📄 Reassembled file: ${completeBuffer.length} bytes`);
       
-      // Process the complete file
-      const stats = await importUnifiedReport(completeBuffer, filename);
+      // Generate import ID
+      const importId = `import_${Date.now()}`;
       
+      // Start processing in the background (don't await)
+      importUnifiedReport(completeBuffer, filename, importId).catch(error => {
+        console.error('❌ Background import failed:', error);
+      });
+      
+      // Return immediately so frontend can start polling
       return NextResponse.json({
         success: true,
         complete: true,
-        message: 'Import completed successfully',
-        stats: {
-          rowsProcessed: stats.processed,
-          customersCreated: stats.customersCreated,
-          customersUpdated: stats.customersUpdated,
-          ordersCreated: stats.ordersCreated,
-          ordersUpdated: stats.ordersUpdated,
-          itemsCreated: stats.itemsCreated,
-          itemsUpdated: stats.itemsUpdated,
-          skipped: stats.skipped
-        }
+        importId: importId,
+        message: 'Import started - check progress',
+        processing: true
       });
     }
 
@@ -114,8 +112,9 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function importUnifiedReport(buffer: Buffer, filename: string): Promise<ImportStats> {
+async function importUnifiedReport(buffer: Buffer, filename: string, importId: string): Promise<{ stats: ImportStats; importId: string }> {
   console.log('📥 Importing Unified Fishbowl Report from Conversight...');
+  console.log(`📋 Import ID: ${importId}`);
   
   let data: Record<string, any>[];
   
@@ -138,6 +137,20 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
     itemsUpdated: 0,
     skipped: 0
   };
+  
+  // Initialize progress tracking in Firestore
+  const progressRef = adminDb.collection('import_progress').doc(importId);
+  await progressRef.set({
+    status: 'parsing',
+    totalRows: data.length,
+    currentRow: 0,
+    percentage: 0,
+    currentCustomer: '',
+    currentOrder: '',
+    stats: stats,
+    startedAt: Timestamp.now(),
+    updatedAt: Timestamp.now()
+  });
   
   // Track what we've already processed (to avoid duplicates within the same import)
   const processedCustomers = new Set<string>();
@@ -186,24 +199,51 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   
   let rowIndex = 0;
   const totalRows = data.length;
+  let lastProgressUpdate = 0;
+  
   for (const row of data) {
     rowIndex++;
     stats.processed++;
     
-    // Log progress every 1000 rows
-    if (stats.processed % 1000 === 0) {
+    // Update progress every 50 rows (for UI responsiveness) and every 1000 rows (for console)
+    const shouldUpdateUI = stats.processed % 50 === 0;
+    const shouldLogConsole = stats.processed % 1000 === 0;
+    
+    if (shouldLogConsole) {
       console.log(`📊 Progress: ${stats.processed} of ${totalRows} (${((stats.processed/totalRows)*100).toFixed(1)}%)`);
       console.log(`   Customers: ${stats.customersCreated} created, ${stats.customersUpdated} updated`);
       console.log(`   Orders: ${stats.ordersCreated} created, ${stats.ordersUpdated} updated`);
       console.log(`   Items: ${stats.itemsCreated} created/updated, Skipped: ${stats.skipped}`);
     }
     
+    if (shouldUpdateUI) {
+      const customerName = row['Customer Name'] || row['Customer'] || '';
+      const salesOrderNum = row['Sales order Number'] || '';
+      const percentage = ((stats.processed / totalRows) * 100);
+      
+      // Update Firestore progress (await to ensure it completes)
+      try {
+        await progressRef.update({
+          status: 'processing',
+          currentRow: stats.processed,
+          percentage: Math.round(percentage * 10) / 10, // Round to 1 decimal
+          currentCustomer: customerName,
+          currentOrder: salesOrderNum,
+          stats: stats,
+          updatedAt: Timestamp.now()
+        });
+        console.log(`📊 Progress updated: ${stats.processed}/${totalRows} (${percentage.toFixed(1)}%)`);
+      } catch (err) {
+        console.error('❌ Progress update error:', err);
+      }
+    }
+    
     
     try {
-      // Extract key fields
-      const customerId = row['Customer Id'] || row['Customer id'];
+      // Extract key fields - EXACT field names from Conversight CSV
+      const customerId = row['Account ID'] || row['Company id'] || row['Customer Id'] || row['Customer id'];
       const salesOrderNum = row['Sales order Number'];
-      const salesOrderId = row['Sales order Id'] || row['Sales Order ID'];
+      const salesOrderId = row['Sales Order ID'] || row['Sales order Id'];
       
       // Skip if missing critical data
       if (!customerId || !salesOrderNum || !salesOrderId) {
@@ -228,13 +268,13 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         const customerData: any = {
           id: customerDocId,  // Fishbowl Customer ID
           name: row['Customer Name'] || row['Customer'] || '',  // Customer Name (try both formats)
-          accountNumber: row['Account Number'] || '',  // Customer Account Number in Fishbowl
+          accountNumber: row['Account ID'] || '',  // Account ID from Conversight
           // PRESERVE existing accountType if it exists, otherwise use Fishbowl value
-          accountType: existingData?.accountType || row['Account Type'] || '',
+          accountType: existingData?.accountType || row['Account type'] || '',
           // PRESERVE manual sales rep assignment (fishbowlUsername) - don't overwrite with import
           fishbowlUsername: existingData?.fishbowlUsername || '',
           companyId: row['Company id'] || '',
-          companyName: row['Company Name'] || row['Company name'] || '',
+          companyName: row['Company name'] || '',
           parentCompanyId: row['Parent Company ID'] || '',
           parentCustomerName: row['Parent Customer Name'] || '',
           shippingCity: row['Shipping City'] || row['Billing City'] || '',
@@ -361,7 +401,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       }
       
       // === 3. CREATE SOITEM (LINE ITEM) ===
-      const lineItemId = row['SO Item ID'] || row['SO item ID'] || row['SO Item Id'];
+      const lineItemId = row['SO Item ID'] || row['So item id'];
       if (!lineItemId) {
         stats.skipped++;
         continue;
@@ -429,8 +469,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         // Customer Info
         customerId: sanitizedCustomerId,
         customerName: row['Customer Name'] || row['Customer'] || '',
-        accountNumber: row['Account Number'] || '',
-        accountType: row['Account Type'] || '',
+        accountNumber: row['Account ID'] || '',
+        accountType: row['Account type'] || '',
         
         // Sales Person
         salesPerson: row['Sales person'] || '',
@@ -466,7 +506,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         
         // Financial Data
         revenue: parseFloat(row['Total Price'] || row['Revenue'] || 0),
-        unitPrice: parseFloat(row['UNIT PRICE'] || row['Unit price'] || row['Unit Price'] || 0),
+        unitPrice: parseFloat(row['Unit price'] || 0),
         invoicedCost: parseFloat(row['Total cost'] || row['Invoiced cost'] || 0),
         margin: parseFloat(row['Sales Order Product Margin'] || row['Margin'] || 0),
         quantity: parseFloat(row['Qty fulfilled'] || row['Shipped Quantity'] || 0),
@@ -519,5 +559,15 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   console.log(`   Line Items: ${stats.itemsCreated} created/updated`);
   console.log(`   Skipped: ${stats.skipped}\n`);
   
-  return stats;
+  // Mark import as complete in Firestore
+  await progressRef.update({
+    status: 'complete',
+    currentRow: stats.processed,
+    percentage: 100,
+    stats: stats,
+    completedAt: Timestamp.now(),
+    updatedAt: Timestamp.now()
+  });
+  
+  return { stats, importId };
 }
