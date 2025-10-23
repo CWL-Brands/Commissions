@@ -973,10 +973,24 @@ async function getCustomerStatus(
 
     // Check if customer hasn't ordered in 12+ months (dormant/reactivated)
     // Dead accounts that come back to life get 8% "Own" rate
-    if (monthsSinceLastOrder >= 12) {
-      console.log(`💤 DORMANT ACCOUNT REACTIVATED: ${customer?.customerName || customerId} - Last order: ${lastOrderDate.toISOString().split('T')[0]} (${monthsSinceLastOrder} months ago)`);
+    // IMPROVED: Check for the LONGEST GAP in order history, not just since last order
+    let longestGapMonths = monthsSinceLastOrder;
+    
+    // Check gaps between ALL previous orders
+    for (let i = 0; i < previousOrders.docs.length - 1; i++) {
+      const order1Date = previousOrders.docs[i].data().postingDate.toDate();
+      const order2Date = previousOrders.docs[i + 1].data().postingDate.toDate();
+      const gapMonths = Math.floor((order1Date - order2Date) / (1000 * 60 * 60 * 24 * 30));
+      if (gapMonths > longestGapMonths) {
+        longestGapMonths = gapMonths;
+      }
+    }
+    
+    if (longestGapMonths >= 12) {
+      console.log(`💤 DORMANT ACCOUNT REACTIVATED: ${customer?.customerName || customerId} - Longest gap: ${longestGapMonths} months`);
+      console.log(`   📅 Last order: ${lastOrderDate.toISOString().split('T')[0]} (${monthsSinceLastOrder} months ago)`);
       console.log(`   📅 Customer age: ${customerAgeMonths} months (from first order ${firstOrderDate.toISOString().split('T')[0]})`);
-      console.log(`   → OWN (8%) - Dead account reactivated after 12+ months`);
+      console.log(`   → OWN (8%) - Dead account reactivated after 12+ month gap`);
       
       // Dead accounts reactivated after 12+ months = "Own" status = 8%
       return 'own';
