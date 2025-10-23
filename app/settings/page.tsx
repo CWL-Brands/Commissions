@@ -329,7 +329,7 @@ export default function SettingsPage() {
             
             if (!exists) {
               // Add missing rate with default values
-              let defaultPercentage = '';
+              let defaultPercentage: number | string = '';
               if (status === 'new_business') {
                 defaultPercentage = segmentId === 'distributor' ? 8.0 : 10.0;
               } else if (status === '6_month_active') {
