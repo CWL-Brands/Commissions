@@ -1,0 +1,54 @@
+[debug] [2025-10-23T17:57:55.361Z] ----------------------------------------------------------------------
+[debug] [2025-10-23T17:57:55.364Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\benwa\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only hosting --force
+[debug] [2025-10-23T17:57:55.364Z] CLI Version:   14.21.0
+[debug] [2025-10-23T17:57:55.364Z] Platform:      win32
+[debug] [2025-10-23T17:57:55.365Z] Node Version:  v20.18.1
+[debug] [2025-10-23T17:57:55.365Z] Time:          Thu Oct 23 2025 11:57:55 GMT-0600 (Mountain Daylight Time)
+[debug] [2025-10-23T17:57:55.365Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-10-23T17:57:55.624Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-10-23T17:57:55.624Z] > authorizing via signed-in user (ben@kanvabotanicals.com)
+[debug] [2025-10-23T17:57:55.624Z] [iam] checking project kanvaportal for permissions ["firebase.projects.get","firebasehosting.sites.update"]
+[debug] [2025-10-23T17:57:55.626Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:55.626Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:55.627Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/kanvaportal:testIamPermissions [none]
+[debug] [2025-10-23T17:57:55.628Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/kanvaportal:testIamPermissions x-goog-quota-user=projects/kanvaportal
+[debug] [2025-10-23T17:57:55.628Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/kanvaportal:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2025-10-23T17:57:55.877Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/kanvaportal:testIamPermissions 200
+[debug] [2025-10-23T17:57:55.878Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/kanvaportal:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2025-10-23T17:57:55.879Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:55.879Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:55.879Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/kanvaportal [none]
+[debug] [2025-10-23T17:57:56.141Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/kanvaportal 200
+[debug] [2025-10-23T17:57:56.141Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/kanvaportal {"projectId":"kanvaportal","projectNumber":"829835149823","displayName":"KanvaPortal","name":"projects/kanvaportal","resources":{"hostingSite":"kanvaportal","realtimeDatabaseInstance":"kanvaportal-default-rtdb"},"state":"ACTIVE","etag":"1_724cdc38-a229-448d-ab11-4f6a09ed3252"}
+[debug] [2025-10-23T17:57:59.354Z] defaultcredentials: writing to file C:\Users\benwa\AppData\Roaming\firebase\ben_kanvabotanicals_com_application_default_credentials.json
+[debug] [2025-10-23T17:57:59.355Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:59.355Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:59.356Z] >>> [apiv2][query] GET https://firebasehosting.googleapis.com/v1beta1/projects/kanvaportal/sites pageToken=&pageSize=10
+[debug] [2025-10-23T17:57:59.924Z] <<< [apiv2][status] GET https://firebasehosting.googleapis.com/v1beta1/projects/kanvaportal/sites 200
+[debug] [2025-10-23T17:57:59.924Z] <<< [apiv2][body] GET https://firebasehosting.googleapis.com/v1beta1/projects/kanvaportal/sites {"sites":[{"name":"projects/kanvaportal/sites/kanvacommissions","defaultUrl":"https://kanvacommissions.web.app","appId":"1:829835149823:web:983b5a7205a9cf9cdf67ca","type":"USER_SITE"},{"name":"projects/kanvaportal/sites/kanvaportal","defaultUrl":"https://kanvaportal.web.app","appId":"1:829835149823:web:500d938c7c6ed3addf67ca","type":"DEFAULT_SITE"},{"name":"projects/kanvaportal/sites/kanvaportal-goals","defaultUrl":"https://kanvaportal-goals.web.app","appId":"1:829835149823:web:68e50ea9f6b1eec3df67ca","type":"USER_SITE"}]}
+[debug] [2025-10-23T17:57:59.925Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:59.925Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:57:59.925Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/-/webApps/1:829835149823:web:983b5a7205a9cf9cdf67ca/config [none]
+[debug] [2025-10-23T17:58:00.357Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/-/webApps/1:829835149823:web:983b5a7205a9cf9cdf67ca/config 200
+[debug] [2025-10-23T17:58:00.357Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/-/webApps/1:829835149823:web:983b5a7205a9cf9cdf67ca/config {"projectId":"kanvaportal","appId":"1:829835149823:web:983b5a7205a9cf9cdf67ca","databaseURL":"https://kanvaportal-default-rtdb.firebaseio.com","storageBucket":"kanvaportal.firebasestorage.app","apiKey":"AIzaSyBwU2sUVjnT-ZqxhBaIWp18DRJzHnTxf9Q","authDomain":"kanvaportal.firebaseapp.com","messagingSenderId":"829835149823","measurementId":"G-N5X2D4HWJ2","projectNumber":"829835149823","version":"2"}
+[info] 
+   Thank you for trying our early preview of Next.js support on Firebase Hosting.
+   During the preview, support is best-effort and breaking changes can be expected. Proceed with caution.
+
+   Documentation: https://firebase.google.com/docs/hosting/frameworks/nextjs
+   File a bug: https://github.com/firebase/firebase-tools/issues/new?template=bug_report.md
+   Submit a feature request: https://github.com/firebase/firebase-tools/issues/new?template=feature_request.md
+
+   We'd love to learn from you. Express your interest in helping us shape the future of Firebase Hosting: https://goo.gle/41enW5X
+
+[debug] [2025-10-23T17:58:08.213Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:58:08.213Z] Checked if tokens are valid: true, expires at: 1761245862549
+[debug] [2025-10-23T17:58:08.214Z] >>> [apiv2][query] GET https://firebasehosting.googleapis.com/v1beta1/projects/kanvaportal/sites/kanvaportal [none]
+[debug] [2025-10-23T17:58:08.732Z] <<< [apiv2][status] GET https://firebasehosting.googleapis.com/v1beta1/projects/kanvaportal/sites/kanvaportal 200
+[debug] [2025-10-23T17:58:08.732Z] <<< [apiv2][body] GET https://firebasehosting.googleapis.com/v1beta1/projects/kanvaportal/sites/kanvaportal {"name":"projects/kanvaportal/sites/kanvaportal","defaultUrl":"https://kanvaportal.web.app","appId":"1:829835149823:web:500d938c7c6ed3addf67ca","type":"DEFAULT_SITE"}
+[info]   ▲ Next.js 14.2.33
+
+[info]   - Environments: .env.local, .env.production
+
+

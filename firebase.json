@@ -9,7 +9,22 @@
     ],
     "frameworksBackend": {
       "region": "us-central1"
-    }
+    },
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "X-Frame-Options",
+            "value": "ALLOW-FROM https://app.copper.com"
+          },
+          {
+            "key": "Content-Security-Policy",
+            "value": "frame-ancestors 'self' https://app.copper.com"
+          }
+        ]
+      }
+    ]
   },
   "firestore": {
     "rules": "firestore.rules",
