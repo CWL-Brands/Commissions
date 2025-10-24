@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { 
@@ -19,23 +19,33 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
+// Separate component for search params to use with Suspense
+function SearchParamsProvider({ onQueryChange }: { onQueryChange: (query: string) => void }) {
+  const searchParams = useSearchParams();
+  
+  useEffect(() => {
+    // Preserve query params for Copper iframe
+    let query = '';
+    try {
+      const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+      const hasParams = searchParams && Array.from(searchParams.keys()).length > 0;
+      if (inIframe && hasParams) {
+        const qs = searchParams.toString();
+        query = qs ? `?${qs}` : '';
+      }
+    } catch {
+      // ignore cross-origin checks
+    }
+    onQueryChange(query);
+  }, [searchParams, onQueryChange]);
+  
+  return null;
+}
+
 export default function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { user, userProfile, isAdmin, isManager } = useAuth();
-
-  // Preserve query params for Copper iframe
-  let query = '';
-  try {
-    const inIframe = typeof window !== 'undefined' && window.self !== window.top;
-    const hasParams = searchParams && Array.from(searchParams.keys()).length > 0;
-    if (inIframe && hasParams) {
-      const qs = searchParams.toString();
-      query = qs ? `?${qs}` : '';
-    }
-  } catch {
-    // ignore cross-origin checks
-  }
+  const [query, setQuery] = useState('');
 
   const handleSignOut = async () => {
     try {
@@ -55,6 +65,11 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
+      {/* Search params handler with Suspense */}
+      <Suspense fallback={null}>
+        <SearchParamsProvider onQueryChange={setQuery} />
+      </Suspense>
+      
       {/* Top Bar */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

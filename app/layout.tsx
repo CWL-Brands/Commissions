@@ -16,10 +16,6 @@ export const metadata: Metadata = {
   },
 };
 
-// Force dynamic rendering for all pages (no static generation)
-export const dynamic = 'force-dynamic';
-export const dynamicParams = true;
-
 export default function RootLayout({
   children,
 }: {

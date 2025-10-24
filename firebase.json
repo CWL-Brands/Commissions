@@ -1,28 +1,16 @@
 {
-  "hosting": [
-    {
-      "site": "kanvacommissions",
-      "source": ".",
-      "frameworksBackend": {
-        "region": "us-central1"
-      },
-      "headers": [
-        {
-          "source": "**",
-          "headers": [
-            {
-              "key": "Content-Security-Policy",
-              "value": "frame-ancestors 'self' https://app.copper.com https://*.copper.com"
-            },
-            {
-              "key": "Access-Control-Allow-Origin",
-              "value": "*"
-            }
-          ]
-        }
-      ]
+  "hosting": {
+    "site": "kanvacommissions",
+    "source": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "frameworksBackend": {
+      "region": "us-central1"
     }
-  ],
+  },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"

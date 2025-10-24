@@ -2,6 +2,27 @@
 
 Multi-rep commission calculator with Copper CRM integration for the Kanva Sales Portal.
 
+---
+
+## 🚨 CRITICAL: BEFORE MAKING DEPLOYMENT CHANGES
+
+**⚠️ READ THIS FIRST:** Before modifying `firebase.json`, `next.config.js`, or `app/layout.tsx`:
+
+**📖 See:** [`DEPLOYMENT_RULES.md`](./DEPLOYMENT_RULES.md) - Critical deployment configuration rules
+
+**Key Rules:**
+- ❌ **NEVER** add `force-dynamic` to root layout
+- ❌ **NEVER** change `firebase.json` from object to array format
+- ❌ **NEVER** add complex webpack configs
+- ✅ **ALWAYS** test with `npm run build` before deploying
+- ✅ **ALWAYS** keep configs simple
+
+**Reference:** Last working config is in commit `50ada75e` (Oct 14-15, 2025)
+
+**Live App:** https://kanvacommissions.web.app
+
+---
+
 ## Features
 
 - **Multi-Bucket Commission System**: New Business (A), Product Mix (B), Maintain Business (C), and Effort (D)

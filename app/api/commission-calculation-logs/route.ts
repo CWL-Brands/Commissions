@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * Get commission calculation logs for a specific month
  * GET /api/commission-calculation-logs?month=2025-10&rep=all

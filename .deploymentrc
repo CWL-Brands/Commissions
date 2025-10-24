@@ -1,0 +1,61 @@
+# ⚠️ DEPLOYMENT CONFIGURATION LOCK FILE ⚠️
+# This file documents the WORKING configuration that must NOT be changed
+# Last verified working: October 24, 2025
+# Reference commit: 50ada75e (October 14-15, 2025)
+
+[firebase.json]
+status = LOCKED
+format = object (NOT array)
+hosting.site = kanvacommissions
+hosting.source = .
+hosting.frameworksBackend.region = us-central1
+headers = NONE (do not add)
+redirects = NONE (use Next.js redirects instead)
+notes = Keep it simple. Array format breaks deployments.
+
+[next.config.js]
+status = LOCKED
+reactStrictMode = true
+swcMinify = true
+images.unoptimized = true
+webpack = NONE (no customization)
+experimental = NONE (no experimental features)
+notes = Minimal config only. Complex webpack breaks Firebase.
+
+[app/layout.tsx]
+status = LOCKED
+force-dynamic = NO (NEVER add this to root layout)
+dynamicParams = NO (NEVER add this to root layout)
+notes = Root layout must support static generation. Use force-dynamic in individual pages only.
+
+[API Routes]
+force-dynamic = YES (add to routes using request.url)
+examples = 
+  - app/api/commission-progress/route.ts
+  - app/api/fishbowl/import-progress/route.ts
+  - app/api/commission-calculation-logs/route.ts
+
+[Client Components]
+useSearchParams = Must wrap in Suspense boundary
+example = See components/templates/AppShell.tsx
+notes = SearchParamsProvider component wrapped in <Suspense fallback={null}>
+
+[Pre-Deployment Checklist]
+1. Run `npm run build` locally
+2. Verify build succeeds (no errors)
+3. Check no changes to firebase.json, next.config.js, or app/layout.tsx
+4. If configs changed, verify against this file
+5. Test in dev mode: `npm run dev`
+6. Only then: `firebase deploy --only hosting`
+
+[Troubleshooting]
+If 403 errors occur:
+1. Check git history for recent config changes
+2. Compare with commit 50ada75e
+3. Revert to working config
+4. Redeploy
+
+[Documentation]
+See: DEPLOYMENT_RULES.md
+See: FIREBASE_403_FIX.md
+See: Memory entry "Firebase Deployment Configuration - CRITICAL RULES"
