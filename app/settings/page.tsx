@@ -1,7 +1,5 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase/config';
@@ -331,7 +329,7 @@ export default function SettingsPage() {
             
             if (!exists) {
               // Add missing rate with default values
-              let defaultPercentage: number | string = '';
+              let defaultPercentage = '';
               if (status === 'new_business') {
                 defaultPercentage = segmentId === 'distributor' ? 8.0 : 10.0;
               } else if (status === '6_month_active') {
