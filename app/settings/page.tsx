@@ -1875,45 +1875,114 @@ export default function SettingsPage() {
     const loadingToast = toast.loading('Uploading file...');
 
     try {
-      // Use unified import (no chunking needed)
-      console.log(`📦 Uploading ${fishbowlFile.name} (${(fishbowlFile.size / 1024 / 1024).toFixed(2)} MB)`);
+      const fileSize = fishbowlFile.size;
+      const fileSizeMB = fileSize / 1024 / 1024;
+      console.log(`📦 Uploading ${fishbowlFile.name} (${fileSizeMB.toFixed(2)} MB)`);
       
-      const formData = new FormData();
-      formData.append('file', fishbowlFile);
+      // Use chunked upload for files larger than 2MB
+      const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
+      const useChunkedUpload = fileSize > CHUNK_SIZE;
       
-      toast.loading('Uploading and processing...', { id: loadingToast });
-      
-      const response = await fetch('/api/fishbowl/import-unified', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Import failed');
-      }
-      
-      console.log('✅ Import completed!', data.stats);
-      
-      // Set result with stats
-      setFishbowlResult({
-        success: true,
-        complete: true,
-        stats: data.stats
-      });
-      
-      setFishbowlFile(null);
-      setFishbowlLoading(false);
-      
-      toast.success(
-        `✅ Imported ${data.stats.itemsCreated} line items (${data.stats.itemsUpdated} updated), ${data.stats.customersCreated} customers (${data.stats.customersUpdated} updated), ${data.stats.ordersCreated} orders (${data.stats.ordersUpdated} updated)!`,
-        { id: loadingToast, duration: 5000 }
-      );
-      
-      // Reload customers if on that tab
-      if (activeTab === 'customers') {
-        loadCustomers();
+      if (useChunkedUpload) {
+        // CHUNKED UPLOAD with progress tracking
+        const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+        const fileId = `file_${Date.now()}`;
+        
+        console.log(`📦 Splitting into ${totalChunks} chunks...`);
+        toast.loading(`Uploading in ${totalChunks} chunks...`, { id: loadingToast });
+        
+        let uploadedChunks = 0;
+        let currentImportId: string | null = null;
+        
+        // Upload each chunk
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, fileSize);
+          const chunk = fishbowlFile.slice(start, end);
+          
+          const formData = new FormData();
+          formData.append('chunk', chunk);
+          formData.append('chunkIndex', i.toString());
+          formData.append('totalChunks', totalChunks.toString());
+          formData.append('fileId', fileId);
+          formData.append('filename', fishbowlFile.name);
+          
+          const uploadProgress = ((i + 1) / totalChunks * 100).toFixed(0);
+          toast.loading(`Uploading chunk ${i + 1}/${totalChunks} (${uploadProgress}%)`, { id: loadingToast });
+          
+          const response = await fetch('/api/fishbowl/import-chunked', {
+            method: 'POST',
+            body: formData,
+          });
+          
+          const data = await response.json();
+          
+          if (!response.ok) {
+            throw new Error(data.error || 'Chunk upload failed');
+          }
+          
+          uploadedChunks++;
+          console.log(`✅ Uploaded chunk ${i + 1}/${totalChunks}`);
+          
+          // If this was the last chunk, we'll get an importId
+          if (data.complete && data.importId) {
+            currentImportId = data.importId;
+            console.log(`🎉 All chunks uploaded! Import ID: ${currentImportId}`);
+            break;
+          }
+        }
+        
+        if (!currentImportId) {
+          throw new Error('Failed to get import ID after upload');
+        }
+        
+        setImportId(currentImportId);
+        toast.loading('Processing import...', { id: loadingToast });
+        
+        // Start polling for progress
+        pollImportProgress(currentImportId, loadingToast);
+        
+      } else {
+        // SMALL FILE: Use unified import (no chunking needed)
+        console.log(`📦 File is small (${fileSizeMB.toFixed(2)} MB), using direct upload`);
+        
+        const formData = new FormData();
+        formData.append('file', fishbowlFile);
+        
+        toast.loading('Uploading and processing...', { id: loadingToast });
+        
+        const response = await fetch('/api/fishbowl/import-unified', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Import failed');
+        }
+        
+        console.log('✅ Import completed!', data.stats);
+        
+        // Set result with stats
+        setFishbowlResult({
+          success: true,
+          complete: true,
+          stats: data.stats
+        });
+        
+        setFishbowlFile(null);
+        setFishbowlLoading(false);
+        
+        toast.success(
+          `✅ Imported ${data.stats.itemsCreated} line items (${data.stats.itemsUpdated} updated), ${data.stats.customersCreated} customers (${data.stats.customersUpdated} updated), ${data.stats.ordersCreated} orders (${data.stats.ordersUpdated} updated)!`,
+          { id: loadingToast, duration: 5000 }
+        );
+        
+        // Reload customers if on that tab
+        if (activeTab === 'customers') {
+          loadCustomers();
+        }
       }
       
     } catch (error: any) {
@@ -1921,6 +1990,77 @@ export default function SettingsPage() {
       toast.error(error.message || 'Failed to import data', { id: loadingToast });
       setFishbowlLoading(false);
     }
+  };
+
+  const pollImportProgress = (importId: string, toastId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const progressResponse = await fetch(`/api/fishbowl/import-progress?importId=${importId}`);
+        const progressData = await progressResponse.json();
+        
+        console.log('Import progress update:', progressData);
+        
+        if (progressData.success && progressData.progress) {
+          const progress = progressData.progress;
+          const percent = progress.percentage || 0;
+          const current = progress.currentRow || 0;
+          const total = progress.totalRows || 0;
+          const currentCustomer = progress.currentCustomer || '';
+          
+          // Update state
+          setImportProgress({
+            percentage: percent,
+            currentRow: current,
+            totalRows: total,
+            status: progress.status
+          });
+          
+          // Update toast
+          if (currentCustomer) {
+            toast.loading(`Processing: ${current} / ${total} (${percent.toFixed(1)}%) - ${currentCustomer}`, { id: toastId });
+          } else {
+            toast.loading(`Processing: ${current} / ${total} (${percent.toFixed(1)}%)`, { id: toastId });
+          }
+          
+          // Check if complete
+          if (progress.status === 'complete') {
+            clearInterval(pollInterval);
+            
+            const stats = progress.stats || {};
+            
+            setFishbowlResult({
+              success: true,
+              complete: true,
+              stats: stats
+            });
+            
+            setFishbowlFile(null);
+            setFishbowlLoading(false);
+            
+            toast.success(
+              `✅ Imported ${stats.itemsCreated || 0} line items, ${stats.customersCreated || 0} customers, ${stats.ordersCreated || 0} orders!`,
+              { id: toastId, duration: 5000 }
+            );
+            
+            // Reload customers if on that tab
+            if (activeTab === 'customers') {
+              loadCustomers();
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Import progress polling error:', err);
+      }
+    }, 2000); // Poll every 2 seconds
+    
+    // Safety timeout after 10 minutes
+    setTimeout(() => {
+      clearInterval(pollInterval);
+      if (fishbowlLoading) {
+        toast.error('Import timeout - please check Firestore for status', { id: toastId });
+        setFishbowlLoading(false);
+      }
+    }, 10 * 60 * 1000);
   };
 
   const handleCopperSync = async () => {
