@@ -205,14 +205,29 @@ async function calculateCommissionsWithProgress(
     // Load all customers with account types
     const customersSnapshot = await adminDb.collection('fishbowl_customers').get();
     const customersMap = new Map();
+    let sampleCustomerLogged = false;
     customersSnapshot.forEach(doc => {
       const data = doc.data();
       const customerData = { id: doc.id, ...data };
+      
+      // Debug: Log first customer to see structure
+      if (!sampleCustomerLogged) {
+        console.log(`\n🔍 Sample Customer Record:`);
+        console.log(`   doc.id: "${doc.id}"`);
+        console.log(`   data.accountNumber: "${data.accountNumber}"`);
+        console.log(`   data.customerNum: "${data.customerNum}"`);
+        console.log(`   data.customerId: "${data.customerId}"`);
+        console.log(`   data.id: "${data.id}"`);
+        console.log(`   data.name: "${data.name}"`);
+        console.log(`   data.accountType: "${data.accountType}"`);
+        sampleCustomerLogged = true;
+      }
       
       // Map by multiple keys for flexibility
       if (data.accountNumber) customersMap.set(data.accountNumber, customerData);
       if (data.customerNum) customersMap.set(data.customerNum, customerData);
       if (data.customerId) customersMap.set(data.customerId, customerData);
+      if (data.id) customersMap.set(data.id, customerData);
       if (doc.id) customersMap.set(doc.id, customerData);
     });
     console.log(`Loaded ${customersSnapshot.size} customers (${customersMap.size} keys) with account types`);
@@ -286,6 +301,17 @@ async function calculateCommissionsWithProgress(
     }
 
     console.log(`✅ Found ${ordersSnapshot.size} orders to process`);
+    
+    // Debug: Log first order to see structure
+    if (!ordersSnapshot.empty) {
+      const firstOrder = ordersSnapshot.docs[0].data();
+      console.log(`\n🔍 Sample Order Record:`);
+      console.log(`   customerId: "${firstOrder.customerId}"`);
+      console.log(`   customerNum: "${firstOrder.customerNum}"`);
+      console.log(`   accountNumber: "${firstOrder.accountNumber}"`);
+      console.log(`   customerName: "${firstOrder.customerName}"`);
+      console.log(`   salesPerson: "${firstOrder.salesPerson}"`);
+    }
 
     // Initialize progress tracking in Firestore
     await progressRef.set({
@@ -423,15 +449,16 @@ async function calculateCommissionsWithProgress(
       const accountType = customer?.accountType || 'Retail';
       const manualTransferStatus = customer?.transferStatus; // Manual override from UI
       
-      // DEBUG: Log customer mapping for problematic customers
-      if (order.customerName?.includes('CK Import') || order.customerName?.includes('Allegria')) {
-        console.log(`🔍 CUSTOMER MAPPING DEBUG: ${order.customerName}`);
-        console.log(`   Order customerId: "${order.customerId}"`);
-        console.log(`   Order customerNum: "${order.customerNum}"`);
-        console.log(`   Order accountNumber: "${order.accountNumber}"`);
-        console.log(`   Customer found:`, customer ? 'YES' : 'NO');
-        console.log(`   Customer accountType: "${accountType}"`);
-        console.log(`   Customer data:`, customer);
+      // CRITICAL: Log ALL orders where customer is NOT found (defaults to Retail)
+      if (!customer) {
+        console.log(`\n⚠️ CUSTOMER NOT FOUND - Defaulting to Retail:`);
+        console.log(`   Order #${order.num} | Customer: "${order.customerName}"`);
+        console.log(`   Tried to find by:`);
+        console.log(`      customerId: "${order.customerId}"`);
+        console.log(`      customerNum: "${order.customerNum}"`);
+        console.log(`      accountNumber: "${order.accountNumber}"`);
+        console.log(`      customerName: "${order.customerName}"`);
+        console.log(`   → Will be SKIPPED (Retail)`);
       }
       
       // Skip Retail accounts (no commission)
