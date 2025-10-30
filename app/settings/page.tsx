@@ -331,13 +331,13 @@ export default function SettingsPage() {
               // Add missing rate with default values
               let defaultPercentage = '';
               if (status === 'new_business') {
-                defaultPercentage = segmentId === 'distributor' ? 8.0 : 10.0;
+                defaultPercentage = segmentId === 'distributor' ? '8.0' : '10.0';
               } else if (status === '6_month_active') {
-                defaultPercentage = segmentId === 'distributor' ? 5.0 : 7.0;
+                defaultPercentage = segmentId === 'distributor' ? '5.0' : '7.0';
               } else if (status === '12_month_active') {
-                defaultPercentage = segmentId === 'distributor' ? 3.0 : 5.0;
+                defaultPercentage = segmentId === 'distributor' ? '3.0' : '5.0';
               } else if (status === 'transferred') {
-                defaultPercentage = 2.0;
+                defaultPercentage = '2.0';
               }
               
               completeRates.push({

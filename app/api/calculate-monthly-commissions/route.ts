@@ -4,14 +4,14 @@ import { Timestamp } from 'firebase-admin/firestore';
 import Decimal from 'decimal.js';
 
 // Helper functions for safe operations
-export function getMonthWindow(year: number, monthTwo: string) {
+function getMonthWindow(year: number, monthTwo: string) {
   const mIdx = parseInt(monthTwo, 10) - 1; // 0-based
   const periodStart = new Date(year, mIdx, 1);
   const periodEnd = new Date(year, mIdx + 1, 0); // last day of target month
   return { periodStart, periodEnd };
 }
 
-export async function deleteByMonthInChunks(
+async function deleteByMonthInChunks(
   collectionName: string,
   monthField: string,
   commissionMonth: string,
@@ -37,7 +37,7 @@ export async function deleteByMonthInChunks(
   }
 }
 
-export async function markProgress(
+async function markProgress(
   ref: FirebaseFirestore.DocumentReference,
   data: Record<string, any>
 ) {
