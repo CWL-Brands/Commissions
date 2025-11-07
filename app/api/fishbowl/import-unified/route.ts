@@ -249,8 +249,10 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       
       const existingData = existingCustomersMap.get(customerDocId) || null;
 
-      // Pull accountType from Copper by Account Number (matches Account Order ID in Copper)
-      const accountNum = row['Account Number'] ?? row['Account ID'];
+      // Pull accountType from Copper (if available)
+      // NOTE: Conversight export has NO Account Order ID field!
+      // accountNumber will be EMPTY until Copper sync fills it via name+address matching
+      const accountNum = row['Account ID'] ?? row['Account id'];
       const copper = copperByAccountNumber.get(String(accountNum));
       const copperAccountType = copper?.accountType?.trim();
 
@@ -281,7 +283,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       const customerData: any = {
         id: customerDocId,
         name: row['Customer Name'] || row['Customer'] || '',
-        accountNumber: row['Account Number'] || row['Account ID'] || '',
+        accountNumber: '', // Will be filled by Copper sync (Conversight doesn't export Account Order ID)
         accountId: row['Account ID'] || '',
         fishbowlUsername: existingData?.fishbowlUsername || '',
         companyId: row['Company id'] || '',
@@ -355,7 +357,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
 
       // Get accountType from cache (consistent with customer)
       const cachedType = customerTypeCache.get(String(customerId));
-      const accountNum2 = row['Account Number'] ?? row['Account ID'];
+      const accountNum2 = row['Account ID'] ?? row['Account id'];
       const orderAccountType = cachedType?.type ?? (copperByAccountNumber.get(String(accountNum2))?.accountType?.trim() || (row['Account Type'] ?? row['Account type'] ?? ''));
       const orderAccountTypeSource = cachedType?.source ?? (copperByAccountNumber.get(String(accountNum2))?.accountType ? 'copper' : 'fishbowl');
 
@@ -427,9 +429,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
 
     // Get accountType from cache (consistent with customer)
     const cachedType2 = customerTypeCache.get(String(customerId));
-    const accountNum3 = row['Account Number'] ?? row['Account ID'];
-    const itemAccountType = cachedType2?.type ?? (copperByAccountNumber.get(String(accountNum3))?.accountType?.trim() || (row['Account Type'] ?? row['Account type'] ?? ''));
-    const itemAccountTypeSource = cachedType2?.source ?? (copperByAccountNumber.get(String(accountNum3))?.accountType ? 'copper' : 'fishbowl');
+    const itemAccountType = cachedType2?.type ?? (copperByAccountNumber.get(String(customerId))?.accountType?.trim() || (row['Account Type'] ?? row['Account type'] ?? ''));
+    const itemAccountTypeSource = cachedType2?.source ?? (copperByAccountNumber.get(String(customerId))?.accountType ? 'copper' : 'fishbowl');
 
     // Mark shipping/CC items
     const labelLower2 = String(row['SO Item Product Number'] ?? row['Part Description'] ?? row['Sales Order Item Description'] ?? '').toLowerCase();
@@ -444,7 +445,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
 
       customerId: sanitizedCustomerId2,
       customerName: row['Customer Name'] || row['Customer'] || '',
-      accountNumber: row['Account Number'] || row['Account ID'] || '',
+      accountNumber: '', // Will be filled by Copper sync (Conversight doesn't export Account Order ID)
       accountId: row['Account ID'] || '',
       accountType: itemAccountType,
       accountTypeSource: itemAccountTypeSource,
