@@ -3085,7 +3085,18 @@ export default function SettingsPage() {
                         <h2 className="text-2xl font-bold text-gray-900 mb-2">
                           📊 Importing Fishbowl Data
                         </h2>
-                        <p className="text-gray-600">Please wait while we process your data...</p>
+                        {importProgress?.status === 'final_phase' ? (
+                          <div className="bg-orange-100 border-l-4 border-orange-500 p-3 rounded">
+                            <p className="text-orange-800 font-semibold">
+                              🔥 Final Phase: Committing remaining records to database...
+                            </p>
+                            <p className="text-orange-700 text-sm mt-1">
+                              This may take a few minutes. Progress updates will be less frequent.
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-gray-600">Please wait while we process your data...</p>
+                        )}
                       </div>
 
                       {importProgress ? (

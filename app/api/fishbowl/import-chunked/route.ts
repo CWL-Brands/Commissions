@@ -240,20 +240,25 @@ async function importUnifiedReport(buffer: Buffer, filename: string, importId: s
       const salesOrderNum = row['Sales order Number'] || '';
       const percentage = ((stats.processed / totalRows) * 100);
       
-      // Update Firestore progress (await to ensure it completes)
-      try {
-        await progressRef.update({
-          status: 'processing',
-          currentRow: stats.processed,
-          percentage: Math.round(percentage * 10) / 10, // Round to 1 decimal
-          currentCustomer: customerName,
-          currentOrder: salesOrderNum,
-          stats: stats,
-          updatedAt: Timestamp.now()
-        });
-        console.log(`📊 Progress updated: ${stats.processed}/${totalRows} (${percentage.toFixed(1)}%)`);
-      } catch (err) {
-        console.error('❌ Progress update error:', err);
+      // Add status message for final phase
+      let statusMessage = 'processing';
+      if (percentage >= 90) {
+        statusMessage = 'final_phase';
+      }
+      
+      // Update Firestore progress (non-blocking - don't await)
+      progressRef.update({
+        status: statusMessage,
+        currentRow: stats.processed,
+        percentage: Math.round(percentage * 10) / 10,
+        currentCustomer: customerName,
+        currentOrder: salesOrderNum,
+        stats: stats,
+        updatedAt: Timestamp.now()
+      }).catch(err => console.error('❌ Progress update error:', err));
+      
+      if (shouldLogConsole || percentage >= 90) {
+        console.log(`📊 Progress: ${stats.processed}/${totalRows} (${percentage.toFixed(1)}%) ${percentage >= 90 ? '🔥 FINAL PHASE' : ''}`);
       }
     }
     
@@ -540,8 +545,20 @@ async function importUnifiedReport(buffer: Buffer, filename: string, importId: s
       // Check batch size
       if (batchCount >= MAX_BATCH_SIZE) {
         try {
+          const percentage = ((stats.processed / totalRows) * 100);
+          console.log(`💾 Committing batch at ${percentage.toFixed(1)}%...`);
           await batch.commit();
-          console.log(`💾 Committed batch: ${stats.customersCreated + stats.customersUpdated} customers, ${stats.ordersCreated + stats.ordersUpdated} orders, ${stats.itemsCreated} items`);
+          console.log(`✅ Batch committed: ${stats.customersCreated + stats.customersUpdated} customers, ${stats.ordersCreated + stats.ordersUpdated} orders, ${stats.itemsCreated} items`);
+          
+          // Update progress after batch commit (non-blocking)
+          progressRef.update({
+            status: percentage >= 90 ? 'final_phase' : 'processing',
+            currentRow: stats.processed,
+            percentage: Math.round(percentage * 10) / 10,
+            stats: stats,
+            updatedAt: Timestamp.now()
+          }).catch(err => console.error('❌ Progress update error:', err));
+          
           batch = adminDb.batch();
           batchCount = 0;
         } catch (error: any) {
