@@ -100,6 +100,9 @@ interface SyncStats {
   noMatch: number;
   matchedByAddress?: number;
   accountNumbersFilled?: number;
+  copperUpdated?: number;
+  copperMarkedActive?: number;
+  copperAccountOrderIdFilled?: number;
 }
 
 async function syncCopperToFishbowl(): Promise<SyncStats> {
@@ -128,8 +131,11 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
   console.log(`📦 Retrieved ${allCopperSnap.size} total Copper companies`);
   
   // Build Copper lookup maps
-  const copperByAccountNumber = new Map<string, { accountType: string; copperId: any; name: string; street: string; city: string; state: string; zip: string; accountOrderId: string }>();
-  const copperByNameAddress = new Map<string, { accountType: string; copperId: any; name: string; accountOrderId: string }>();
+  const copperByAccountNumber = new Map<string, { accountType: string; copperId: any; name: string; street: string; city: string; state: string; zip: string; accountOrderId: string; docId: string; isActive: boolean }>();
+  const copperByNameAddress = new Map<string, { accountType: string; copperId: any; name: string; accountOrderId: string; docId: string; isActive: boolean }>();
+  
+  // Track Copper companies that need updates (mark active, fill Account Order ID)
+  const copperUpdatesNeeded = new Map<string, { accountOrderId: string; markActive: boolean }>();
   
   let debugCount = 0;
   let withAccountOrderId = 0;
@@ -157,6 +163,7 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
     const zip = d['Postal Code cf_698469'] || d['zip'] || '';
     
     const normalizedAccountType = normalizeAccountType(accountType || '');
+    const isActiveFlag = activeValues.includes(isActive);
     const copperData = {
       accountType: normalizedAccountType,
       copperId: copperId,
@@ -165,7 +172,9 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
       city: String(city),
       state: String(state),
       zip: String(zip),
-      accountOrderId: String(accountOrderId || '')
+      accountOrderId: String(accountOrderId || ''),
+      docId: doc.id,
+      isActive: isActiveFlag
     };
     
     // Map by Account Order ID (if populated)
@@ -211,6 +220,9 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
   let fbDebugCount = 0;
   let matchedByAddress = 0;
   let accountNumbersFilled = 0;
+  let copperUpdatesCount = 0;
+  let copperMarkedActiveCount = 0;
+  let copperAccountOrderIdFilledCount = 0;
   
   for (const doc of fishbowlSnap.docs) {
     const d = doc.data() || {};
@@ -260,7 +272,30 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
     
     stats.matched++;
     
-    // Prepare update data
+    // === BIDIRECTIONAL SYNC: Track Copper updates needed ===
+    // If Fishbowl customer exists, Copper should be marked active and have Account Order ID
+    const fishbowlAccountNumber = accountNumber || d.accountId;
+    if (fishbowlAccountNumber) {
+      const needsCopperUpdate = !copper.isActive || !copper.accountOrderId || copper.accountOrderId === '';
+      
+      if (needsCopperUpdate) {
+        copperUpdatesNeeded.set(copper.docId, {
+          accountOrderId: String(fishbowlAccountNumber),
+          markActive: !copper.isActive
+        });
+        
+        if (!copper.isActive) {
+          copperMarkedActiveCount++;
+          console.log(`✅ Will mark Copper "${copper.name}" as ACTIVE (exists in Fishbowl)`);
+        }
+        if (!copper.accountOrderId || copper.accountOrderId === '') {
+          copperAccountOrderIdFilledCount++;
+          console.log(`📝 Will fill Copper "${copper.name}" Account Order ID: ${fishbowlAccountNumber}`);
+        }
+      }
+    }
+    
+    // Prepare Fishbowl update data
     const updateData: any = {
       accountType: copper.accountType,
       accountTypeSource: 'copper_sync',
@@ -274,7 +309,7 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
       if (copper.accountOrderId && copper.accountOrderId !== '') {
         updateData.accountNumber = copper.accountOrderId;
         accountNumbersFilled++;
-        console.log(`📝 Filling accountNumber for "${name}": ${copper.accountOrderId}`);
+        console.log(`📝 Filling Fishbowl accountNumber for "${name}": ${copper.accountOrderId}`);
       }
     }
     
@@ -309,24 +344,80 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
     }
   }
   
-  // Final commit
+  // Final commit for Fishbowl updates
   if (batchCount > 0) {
     await batch.commit();
-    console.log(`✅ Committed final batch of ${batchCount} updates`);
+    console.log(`✅ Committed final batch of ${batchCount} Fishbowl updates`);
   }
   
-  console.log('\n✅ Sync Complete!');
+  // === STEP 4: Update Copper companies (mark active, fill Account Order ID) ===
+  console.log('\n🔄 Updating Copper companies...');
+  console.log(`   ${copperUpdatesNeeded.size} Copper companies need updates`);
+  
+  if (copperUpdatesNeeded.size > 0) {
+    let copperBatch = adminDb.batch();
+    let copperBatchCount = 0;
+    
+    for (const [docId, updateInfo] of copperUpdatesNeeded.entries()) {
+      const copperRef = adminDb.collection('copper_companies').doc(docId);
+      const copperUpdateData: any = {};
+      
+      // Fill Account Order ID if missing
+      if (updateInfo.accountOrderId) {
+        copperUpdateData[fieldAccountOrderId] = updateInfo.accountOrderId;
+      }
+      
+      // Mark as active if not already
+      if (updateInfo.markActive) {
+        copperUpdateData[fieldActive] = 'Checked'; // Copper uses 'Checked' for active
+      }
+      
+      copperBatch.update(copperRef, copperUpdateData);
+      copperBatchCount++;
+      copperUpdatesCount++;
+      
+      // Commit in batches
+      if (copperBatchCount >= MAX_BATCH) {
+        await copperBatch.commit();
+        console.log(`✅ Committed Copper batch of ${copperBatchCount} updates`);
+        copperBatch = adminDb.batch();
+        copperBatchCount = 0;
+      }
+    }
+    
+    // Final Copper commit
+    if (copperBatchCount > 0) {
+      await copperBatch.commit();
+      console.log(`✅ Committed final Copper batch of ${copperBatchCount} updates`);
+    }
+    
+    console.log(`✅ Updated ${copperUpdatesCount} Copper companies`);
+    console.log(`   - Marked as Active: ${copperMarkedActiveCount}`);
+    console.log(`   - Account Order ID filled: ${copperAccountOrderIdFilledCount}`);
+  }
+  
+  console.log('\n✅ Bidirectional Sync Complete!');
   console.log(`   Copper companies loaded: ${stats.copperLoaded}`);
   console.log(`   Fishbowl customers loaded: ${stats.fishbowlLoaded}`);
   console.log(`   Matched: ${stats.matched}`);
   console.log(`     - By Account Number: ${stats.matched - matchedByAddress}`);
   console.log(`     - By Name+Address: ${matchedByAddress}`);
-  console.log(`   Updated: ${stats.updated}`);
-  console.log(`   Account Numbers filled: ${accountNumbersFilled}`);
+  console.log(`   Fishbowl updated: ${stats.updated}`);
+  console.log(`   Fishbowl Account Numbers filled: ${accountNumbersFilled}`);
+  console.log(`   Copper updated: ${copperUpdatesCount}`);
+  console.log(`     - Marked as Active: ${copperMarkedActiveCount}`);
+  console.log(`     - Account Order ID filled: ${copperAccountOrderIdFilledCount}`);
   console.log(`   Already correct: ${stats.alreadyCorrect}`);
   console.log(`   No match: ${stats.noMatch}`);
   
-  return { ...stats, matchedByAddress, accountNumbersFilled };
+  return { 
+    ...stats, 
+    matchedByAddress, 
+    accountNumbersFilled,
+    copperUpdated: copperUpdatesCount,
+    copperMarkedActive: copperMarkedActiveCount,
+    copperAccountOrderIdFilled: copperAccountOrderIdFilledCount
+  };
 }
 
 /**
