@@ -98,6 +98,8 @@ interface SyncStats {
   updated: number;
   alreadyCorrect: number;
   noMatch: number;
+  matchedByAddress?: number;
+  accountNumbersFilled?: number;
 }
 
 async function syncCopperToFishbowl(): Promise<SyncStats> {
@@ -125,8 +127,9 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
   const allCopperSnap = await adminDb.collection('copper_companies').get();
   console.log(`📦 Retrieved ${allCopperSnap.size} total Copper companies`);
   
-  // Build Copper lookup map (by Account Order ID = Fishbowl accountNumber)
-  const copperByAccountNumber = new Map<string, { accountType: string; copperId: any; name: string }>();
+  // Build Copper lookup maps
+  const copperByAccountNumber = new Map<string, { accountType: string; copperId: any; name: string; street: string; city: string; state: string; zip: string; accountOrderId: string }>();
+  const copperByNameAddress = new Map<string, { accountType: string; copperId: any; name: string; accountOrderId: string }>();
   
   let debugCount = 0;
   let withAccountOrderId = 0;
@@ -147,31 +150,45 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
     }
     activeCount++;
     
-    // ONLY include companies that have Account Order ID populated
-    if (!accountOrderId || accountOrderId === '' || accountOrderId === null) {
-      return; // Skip companies without Account Order ID
-    }
+    // Get address fields for name+address matching
+    const street = d['Street Address cf_698457'] || d['street'] || '';
+    const city = d['City cf_698461'] || d['city'] || '';
+    const state = d['State cf_698465'] || d['state'] || '';
+    const zip = d['Postal Code cf_698469'] || d['zip'] || '';
     
-    withAccountOrderId++;
-    
-    // Debug first 5 Copper records
-    if (debugCount < 5) {
-      console.log(`🔍 Copper ${debugCount + 1}: "${name}"`);
-      console.log(`   Account Order ID: ${accountOrderId}`);
-      console.log(`   Account Type: ${accountType || '(empty - will be Retail)'}`);
-      console.log(`   Copper ID: ${copperId}`);
-      debugCount++;
-    }
-    
-    // Key by Account Order ID (direct match to Fishbowl accountNumber)
-    const key = String(accountOrderId).trim();
     const normalizedAccountType = normalizeAccountType(accountType || '');
-    
-    copperByAccountNumber.set(key, {
+    const copperData = {
       accountType: normalizedAccountType,
       copperId: copperId,
-      name: String(name)
-    });
+      name: String(name),
+      street: String(street),
+      city: String(city),
+      state: String(state),
+      zip: String(zip),
+      accountOrderId: String(accountOrderId || '')
+    };
+    
+    // Map by Account Order ID (if populated)
+    if (accountOrderId && accountOrderId !== '' && accountOrderId !== null) {
+      const key = String(accountOrderId).trim();
+      copperByAccountNumber.set(key, copperData);
+      withAccountOrderId++;
+      
+      // Debug first 5 Copper records
+      if (debugCount < 5) {
+        console.log(`🔍 Copper ${debugCount + 1}: "${name}"`);
+        console.log(`   Account Order ID: ${accountOrderId}`);
+        console.log(`   Account Type: ${accountType || '(empty - will be Retail)'}`);
+        console.log(`   Copper ID: ${copperId}`);
+        debugCount++;
+      }
+    }
+    
+    // ALSO map by name+address for fallback matching
+    const nameAddressKey = makeKey(name, street, city, state, zip);
+    if (nameAddressKey && !copperByNameAddress.has(nameAddressKey)) {
+      copperByNameAddress.set(nameAddressKey, copperData);
+    }
     
     stats.copperLoaded++;
   });
@@ -192,27 +209,47 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
   const MAX_BATCH = 450;
   
   let fbDebugCount = 0;
+  let matchedByAddress = 0;
+  let accountNumbersFilled = 0;
+  
   for (const doc of fishbowlSnap.docs) {
     const d = doc.data() || {};
     
-    // Get Fishbowl accountNumber (directly matches Copper Account Order ID)
+    // Get Fishbowl data
     const name = d.name ?? d.customerName;
     const accountNumber = d.accountNumber ?? d.accountId;
+    const street = d.billingAddress || d.shippingAddress || '';
+    const city = d.billingCity || d.shippingCity || '';
+    const state = d.billingState || d.shippingState || '';
+    const zip = d.billingZip || d.shipToZip || '';
     
-    if (!accountNumber) {
-      stats.noMatch++;
-      continue;
+    let copper = null;
+    let matchMethod = '';
+    
+    // Method 1: Direct lookup by Account Number
+    if (accountNumber && accountNumber !== '') {
+      const accountNumberKey = String(accountNumber).trim();
+      copper = copperByAccountNumber.get(accountNumberKey);
+      if (copper) {
+        matchMethod = 'account_number';
+      }
     }
     
-    // Direct lookup by Account Number
-    const accountNumberKey = String(accountNumber).trim();
-    const copper = copperByAccountNumber.get(accountNumberKey);
+    // Method 2: Fallback to name+address matching (for customers with empty accountNumber)
+    if (!copper) {
+      const nameAddressKey = makeKey(name, street, city, state, zip);
+      copper = copperByNameAddress.get(nameAddressKey);
+      if (copper) {
+        matchMethod = 'name_address';
+        matchedByAddress++;
+      }
+    }
     
     // Debug first 5 Fishbowl records
     if (fbDebugCount < 5) {
       console.log(`🐟 Fishbowl ${fbDebugCount + 1}: "${name}"`);
-      console.log(`   Account Number: ${accountNumber}`);
-      console.log(`   Match: ${copper ? '✅ ' + copper.name + ' (' + copper.accountType + ')' : '❌ No Copper match'}`);
+      console.log(`   Account Number: ${accountNumber || '(empty)'}`);
+      console.log(`   Match: ${copper ? '✅ ' + copper.name + ' (' + copper.accountType + ') via ' + matchMethod : '❌ No Copper match'}`);
       fbDebugCount++;
     }
     
@@ -223,16 +260,8 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
     
     stats.matched++;
     
-    // Check if already correct
-    if (d.accountType === copper.accountType && 
-        d.accountTypeSource === 'copper_sync' &&
-        d.copperId === copper.copperId) {
-      stats.alreadyCorrect++;
-      continue;
-    }
-    
-    // Update needed
-    const updateData = {
+    // Prepare update data
+    const updateData: any = {
       accountType: copper.accountType,
       accountTypeSource: 'copper_sync',
       copperId: copper.copperId,
@@ -240,6 +269,28 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
       updatedAt: Timestamp.now()
     };
     
+    // CRITICAL: If matched by name+address and accountNumber is missing, fill it in!
+    if (matchMethod === 'name_address' && (!accountNumber || accountNumber === '')) {
+      if (copper.accountOrderId && copper.accountOrderId !== '') {
+        updateData.accountNumber = copper.accountOrderId;
+        accountNumbersFilled++;
+        console.log(`📝 Filling accountNumber for "${name}": ${copper.accountOrderId}`);
+      }
+    }
+    
+    // Check if already correct
+    const alreadyCorrect = 
+      d.accountType === copper.accountType && 
+      d.accountTypeSource === 'copper_sync' &&
+      d.copperId === copper.copperId &&
+      (!updateData.accountNumber || d.accountNumber === updateData.accountNumber);
+    
+    if (alreadyCorrect) {
+      stats.alreadyCorrect++;
+      continue;
+    }
+    
+    // Update needed
     batch.update(doc.ref, updateData);
     batchCount++;
     stats.updated++;
@@ -268,11 +319,14 @@ async function syncCopperToFishbowl(): Promise<SyncStats> {
   console.log(`   Copper companies loaded: ${stats.copperLoaded}`);
   console.log(`   Fishbowl customers loaded: ${stats.fishbowlLoaded}`);
   console.log(`   Matched: ${stats.matched}`);
+  console.log(`     - By Account Number: ${stats.matched - matchedByAddress}`);
+  console.log(`     - By Name+Address: ${matchedByAddress}`);
   console.log(`   Updated: ${stats.updated}`);
+  console.log(`   Account Numbers filled: ${accountNumbersFilled}`);
   console.log(`   Already correct: ${stats.alreadyCorrect}`);
   console.log(`   No match: ${stats.noMatch}`);
   
-  return stats;
+  return { ...stats, matchedByAddress, accountNumbersFilled };
 }
 
 /**
