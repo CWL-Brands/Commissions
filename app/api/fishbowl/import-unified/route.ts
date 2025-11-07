@@ -166,6 +166,25 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
   // Cache final customer accountType for consistent order/item writes
   const customerTypeCache = new Map<string, { type: string; source: 'override'|'existing'|'copper'|'fishbowl' }>();
   
+  // PRE-FETCH all existing customers and orders in bulk to avoid timeout
+  console.log('📦 Pre-fetching existing customers and orders...');
+  const [existingCustomersSnap, existingOrdersSnap] = await Promise.all([
+    adminDb.collection('fishbowl_customers').get(),
+    adminDb.collection('fishbowl_sales_orders').get()
+  ]);
+  
+  const existingCustomersMap = new Map<string, any>();
+  existingCustomersSnap.forEach(doc => {
+    existingCustomersMap.set(doc.id, doc.data());
+  });
+  
+  const existingOrdersMap = new Map<string, boolean>();
+  existingOrdersSnap.forEach(doc => {
+    existingOrdersMap.set(doc.id, true);
+  });
+  
+  console.log(`✅ Found ${existingCustomersMap.size} existing customers, ${existingOrdersMap.size} existing orders`);
+  
   // FIRST PASS: Aggregate order totals from line items
   console.log('🔄 First pass: Aggregating order totals with precise decimal math...');
   const orderTotals = new Map<string, { revenue: Decimal; orderValue: Decimal; lineCount: number }>();
@@ -228,8 +247,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       const customerDocId = String(customerId).replace(/[\/\\]/g, '_').trim();
       const customerRef = adminDb.collection('fishbowl_customers').doc(customerDocId);
       
-      const existingCustomer = await customerRef.get();
-      const existingData = existingCustomer.exists ? (existingCustomer.data() || {}) : null;
+      const existingData = existingCustomersMap.get(customerDocId) || null;
 
       // Pull accountType from Copper by Account Number (matches Account Order ID in Copper)
       const accountNum = row['Account Number'] ?? row['Account ID'];
@@ -293,7 +311,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         source: 'fishbowl_unified',
       };
       
-      if (existingCustomer.exists) {
+      if (existingData) {
         batch.update(customerRef, customerData);
         stats.customersUpdated++;
       } else {
@@ -372,8 +390,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
         source: 'fishbowl_unified',
       };
       
-      const existingOrder = await orderRef.get();
-      if (existingOrder.exists) {
+      if (existingOrdersMap.has(orderDocId)) {
         batch.update(orderRef, orderData);
         stats.ordersUpdated++;
       } else {
@@ -385,7 +402,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       batchCount++;
     }
     
-    // === 3. CREATE/UPDATE LINE ITEM ===
+    // === 3. CREATE LINE ITEM ===
+    // Note: We use set() which will overwrite if exists - this is correct for imports
     const itemDocId = `soitem_${String(lineItemId).replace(/[\/\\]/g,'_')}`;
     const itemRef = adminDb.collection('fishbowl_soitems').doc(itemDocId);
 
@@ -476,15 +494,9 @@ async function importUnifiedReport(buffer: Buffer, filename: string): Promise<Im
       source: 'fishbowl_unified',
     };
 
-    // Accurate created/updated counts
-    const existingItem = await itemRef.get();
-    if (existingItem.exists) {
-      batch.update(itemRef, itemData);
-      stats.itemsUpdated++;
-    } else {
-      batch.set(itemRef, itemData);
-      stats.itemsCreated++;
-    }
+    // Use set() to create or overwrite (imports are idempotent)
+    batch.set(itemRef, itemData);
+    stats.itemsCreated++;
     batchCount++;
 
     // Commit chunk

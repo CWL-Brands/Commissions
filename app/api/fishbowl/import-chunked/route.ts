@@ -156,6 +156,25 @@ async function importUnifiedReport(buffer: Buffer, filename: string, importId: s
   const processedCustomers = new Set<string>();
   const processedOrders = new Set<string>();
   
+  // PRE-FETCH all existing customers and orders in bulk to avoid timeout
+  console.log('📦 Pre-fetching existing customers and orders...');
+  const [existingCustomersSnap, existingOrdersSnap] = await Promise.all([
+    adminDb.collection('fishbowl_customers').get(),
+    adminDb.collection('fishbowl_sales_orders').get()
+  ]);
+  
+  const existingCustomersMap = new Map<string, any>();
+  existingCustomersSnap.forEach(doc => {
+    existingCustomersMap.set(doc.id, doc.data());
+  });
+  
+  const existingOrdersMap = new Map<string, boolean>();
+  existingOrdersSnap.forEach(doc => {
+    existingOrdersMap.set(doc.id, true);
+  });
+  
+  console.log(`✅ Found ${existingCustomersMap.size} existing customers, ${existingOrdersMap.size} existing orders`);
+  
   // FIRST PASS: Aggregate order totals from line items using Decimal.js for precision
   console.log('🔄 First pass: Aggregating order totals with precise decimal math...');
   const orderTotals = new Map<string, { revenue: Decimal; orderValue: Decimal; lineCount: number }>();
@@ -261,9 +280,8 @@ async function importUnifiedReport(buffer: Buffer, filename: string, importId: s
         
         const customerRef = adminDb.collection('fishbowl_customers').doc(customerDocId);
         
-        // Check if exists first to preserve account type
-        const existingCustomer = await customerRef.get();
-        const existingData = existingCustomer.exists ? existingCustomer.data() : null;
+        // Check if exists using pre-fetched map
+        const existingData = existingCustomersMap.get(customerDocId) || null;
         
         const customerData: any = {
           id: customerDocId,  // Fishbowl Customer ID
@@ -288,7 +306,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string, importId: s
           source: 'fishbowl_unified',
         };
         
-        if (existingCustomer.exists) {
+        if (existingData) {
           batch.update(customerRef, customerData);
           stats.customersUpdated++;
         } else {
@@ -387,8 +405,7 @@ async function importUnifiedReport(buffer: Buffer, filename: string, importId: s
           source: 'fishbowl_unified',
         };
         
-        const existingOrder = await orderRef.get();
-        if (existingOrder.exists) {
+        if (existingOrdersMap.has(orderDocId)) {
           batch.update(orderRef, orderData);
           stats.ordersUpdated++;
         } else {
